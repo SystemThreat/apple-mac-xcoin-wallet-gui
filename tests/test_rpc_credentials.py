@@ -39,8 +39,8 @@ class Creds(unittest.TestCase):
         return w.parser().parse_args([*argv, "info"])
 
     def creds(self, *argv):
-        a = self.args(*argv)
-        return w.rpc_credentials(a, w.parse_conf(a.config))
+        rpc = w.RPC(self.args(*argv))
+        return rpc.user, rpc.password, rpc.auth_source
 
     def error(self, *argv):
         with self.assertRaises(w.WalletError) as cm: w.RPC(self.args(*argv))
@@ -104,13 +104,29 @@ class TestOrder(Creds):
         self.assertEqual(self.creds("--config", str(conf))[:2], ("__cookie__", "relative"))
 
     def test_conf_rpccookiefile_missing_is_an_error(self):
-        d, conf = self.node(f"rpccookiefile={self.root / 'gone.cookie'}\nrpcuser=confu\nrpcpassword=confp\n")
+        d, conf = self.node(f"rpccookiefile={self.root / 'gone.cookie'}\n")
+        os.environ.update(XCOIN_RPC_USER="envu", XCOIN_RPC_PASSWORD="envp")
         msg = self.error("--config", str(conf))
         self.assertIn(str(self.root / "gone.cookie"), msg); self.assertIn("Is the node running", msg)
 
-    def test_autodetected_cookie_beats_conf_rpcuser(self):
+    def test_conf_rpcuser_rpcpassword_beat_an_autodetected_cookie(self):
+        # a node whose conf sets rpcpassword= writes no cookie (src/httprpc.cpp): a .cookie
+        # beside that conf is left over from an earlier run, or another node's
         d, conf = self.node("rpcuser=confu\nrpcpassword=confp\n")
-        self.assertEqual(self.creds("--config", str(conf))[:2], ("__cookie__", SECRET))
+        self.write(self.home / "Library" / "Application Support" / "NEX" / ".cookie", "__cookie__:builtin\n")
+        self.assertEqual(self.creds("--config", str(conf)), ("confu", "confp", f"rpcuser/rpcpassword in {conf}"))
+
+    def test_conf_rpcpassword_beats_conf_rpccookiefile(self):
+        # the node reads rpcpassword= first and then writes no cookie, rpccookiefile= or not
+        conf_cookie = self.write(self.root / "conf.cookie", "__cookie__:fromconf\n")
+        d, conf = self.node(f"rpccookiefile={conf_cookie}\nrpcuser=confu\nrpcpassword=confp\n")
+        self.assertEqual(self.creds("--config", str(conf))[:2], ("confu", "confp"))
+
+    def test_half_a_conf_login_does_not_beat_the_cookie(self):
+        # rpcuser= alone: the node writes a cookie, and the env vars stay the last resort
+        d, conf = self.node("rpcuser=confu\n")
+        os.environ.update(XCOIN_RPC_PASSWORD="envp")
+        self.assertEqual(self.creds("--config", str(conf)), ("__cookie__", SECRET, f"the node's cookie {d / '.cookie'}"))
 
     def test_conf_rpcuser_when_no_cookie_and_beats_env(self):
         d, conf = self.node("rpcuser=confu\nrpcpassword=confp\n", cookie=None)
@@ -129,11 +145,24 @@ class TestOrder(Creds):
         self.assertEqual((user, password), ("confu", "envp")); self.assertIn("XCOIN_RPC_PASSWORD", source)
 
 class TestAutoDetect(Creds):
+    def builtin(self):
+        """The node's built-in data directory under the test HOME."""
+        return self.home / ("Library/Application Support/NEX" if sys.platform == "darwin" else ".nex")
+
     def test_datadir_in_conf(self):
         data = self.root / "chaindata"
         self.write(data / ".cookie", "__cookie__:datadir\n")
         d, conf = self.node(f"datadir={data}\n")                    # d/.cookie exists but is not the datadir
         self.assertEqual(self.creds("--config", str(conf))[:2], ("__cookie__", "datadir"))
+
+    def test_datadir_in_conf_is_the_only_place_looked(self):
+        # no cookie in datadir=: another node's cookie beside the conf, in ~/.xcoin or in the
+        # built-in data directory is not taken (it would go to this conf's port)
+        d, conf = self.node(f"datadir={self.root / 'chaindata'}\n")
+        for other in (self.home / ".xcoin", self.builtin()): self.write(other / ".cookie", "__cookie__:othernode\n")
+        msg = self.error("--config", str(conf))
+        self.assertIn(f"looked at {self.root / 'chaindata' / '.cookie'})", msg)
+        self.assertNotIn("othernode", msg)
 
     def test_relative_datadir_is_beside_the_conf(self):
         d, conf = self.node("datadir=chain\n", cookie=None)
@@ -148,6 +177,21 @@ class TestAutoDetect(Creds):
                 self.write(d / sub / ".cookie", f"__cookie__:{sub}\n")
                 self.assertEqual(self.creds("--config", str(conf))[1], sub)
 
+    def test_chain_subdirectory_from_the_port_when_the_conf_names_none(self):
+        # a node run with -testnet (or -regtest) on the command line: the conf says nothing,
+        # the port in use says which chain's cookie to read
+        for conf_text, argv, sub in (("rpcport=19432\n", (), "testneta"), ("server=1\n", ("--rpc-port", "19432"), "testneta"),
+                                     ("rpcport=18443\n", (), "regtest"), ("server=1\n", ("--rpc-port", "18443"), "regtest")):
+            with self.subTest(conf_text=conf_text, argv=argv):
+                d, conf = self.node(conf_text, cookie="__cookie__:mainnet\n")
+                self.write(d / sub / ".cookie", f"__cookie__:{sub}\n")
+                self.assertEqual(self.creds("--config", str(conf), *argv)[1], sub)
+
+    def test_the_confs_chain_beats_the_port(self):
+        d, conf = self.node("chain=main\nrpcport=19432\n")
+        self.write(d / "testneta" / ".cookie", "__cookie__:testneta\n")
+        self.assertEqual(self.creds("--config", str(conf))[1], SECRET)
+
     def test_mainnet_conf_never_takes_a_testnet_cookie(self):
         for conf_text in ("server=1\n", "testnet=0\n", "chain=main\n"):
             with self.subTest(conf_text=conf_text):
@@ -157,25 +201,42 @@ class TestAutoDetect(Creds):
                 msg = self.error("--config", str(conf))
                 self.assertIn(str(d / ".cookie"), msg)
 
-    def test_default_xcoin_home(self):
+    def test_xcoin_home_only_for_the_default_config(self):
+        # ~/.xcoin is the default conf's own directory; any other conf never reads a cookie there
         self.write(self.home / ".xcoin" / ".cookie", "__cookie__:xcoinhome\n")
-        user, password, source = self.creds("--config", str(self.root / "missing" / "nex.conf"))
-        self.assertEqual(password, "xcoinhome"); self.assertIn(str(self.home / ".xcoin" / ".cookie"), source)
+        msg = self.error("--config", str(self.root / "missing" / "nex.conf"))
+        self.assertNotIn(str(self.home / ".xcoin"), msg)
+        self.assertIn(str(self.root / "missing" / ".cookie"), msg); self.assertIn(str(self.builtin() / ".cookie"), msg)
 
     def test_default_config_is_the_xcoin_home(self):
         # no --config at all: the default ~/.xcoin/nex.conf (absent here) leads to ~/.xcoin/.cookie
         self.write(self.home / ".xcoin" / ".cookie", "__cookie__:defaultconf\n")
-        a = w.parser().parse_args(["--config", str(self.home / ".xcoin" / "nex.conf"), "info"])
-        self.assertEqual(w.rpc_credentials(a, {})[1], "defaultconf")
+        user, password, source = self.creds("--config", str(self.home / ".xcoin" / "nex.conf"))
+        self.assertEqual(password, "defaultconf"); self.assertIn(str(self.home / ".xcoin" / ".cookie"), source)
+
+    def test_readme_testnet_alias(self):
+        # a testnet A node run with -testnet -datadir=~/.xcoin; the mainnet node's cookie in the
+        # built-in data directory is never sent to port 19432
+        self.write(self.builtin() / ".cookie", "__cookie__:mainnet\n")
+        self.write(self.home / ".xcoin" / "testneta" / ".cookie", "__cookie__:testneta\n")
+        cookie = self.home / ".xcoin" / "testneta" / ".cookie"
+        for argv in (("--config", str(self.home / ".xcoin" / "nex.conf"), "--rpc-port", "19432"),
+                     ("--rpc-cookie", "~/.xcoin/testneta/.cookie", "--rpc-port", "19432")):
+            with self.subTest(argv=argv):
+                user, password, source = self.creds("--config", str(self.home / ".xcoin" / "nex.conf"), *argv)
+                self.assertEqual(password, "testneta"); self.assertIn(str(cookie), source)
 
     def test_the_nodes_built_in_datadir(self):
+        # a node started with only -conf=<this conf> keeps its data in the built-in directory
         for platform, where in (("darwin", Path("Library") / "Application Support" / "NEX"), ("linux", Path(".nex"))):
             with self.subTest(platform=platform), mock.patch.object(w.sys, "platform", platform):
                 self.write(self.home / where / ".cookie", f"__cookie__:{platform}\n")
+                d, conf = self.node(cookie=None)
+                self.assertEqual(self.creds("--config", str(conf))[1], platform)
                 self.assertEqual(self.creds("--config", str(self.root / "missing" / "nex.conf"))[1], platform)
 
-    def test_conf_directory_before_the_defaults(self):
-        self.write(self.home / ".xcoin" / ".cookie", "__cookie__:xcoinhome\n")
+    def test_conf_directory_before_the_built_in_datadir(self):
+        self.write(self.builtin() / ".cookie", "__cookie__:builtin\n")
         d, conf = self.node()
         self.assertEqual(self.creds("--config", str(conf))[1], SECRET)
 
@@ -185,19 +246,80 @@ class TestAutoDetect(Creds):
         self.write(d / ".cookie", "__cookie__:afterrestart\n")        # the node restarted
         self.assertEqual(w.RPC(self.args("--config", str(conf))).password, "afterrestart")
 
-    def test_unreadable_autodetected_cookie_falls_through_to_conf_login(self):
+    def test_unreadable_autodetected_cookie_falls_through_to_env(self):
         if os.geteuid() == 0: self.skipTest("root reads any file")
-        d, conf = self.node("rpcuser=confu\nrpcpassword=confp\n", cookie=COOKIE)
+        d, conf = self.node("rpcuser=confu\n", cookie=COOKIE)
+        os.environ.update(XCOIN_RPC_PASSWORD="envp")
         os.chmod(d / ".cookie", 0)
         self.addCleanup(os.chmod, d / ".cookie", 0o600)
-        self.assertEqual(self.creds("--config", str(conf))[:2], ("confu", "confp"))
+        self.assertEqual(self.creds("--config", str(conf))[:2], ("confu", "envp"))
+
+class TestRemote(Creds):
+    """A cookie the wallet finds itself is this machine's node login: it goes to a node on
+    this machine only. A remote node needs its own login, named explicitly."""
+    def setUp(self):
+        super().setUp()
+        self.seen = []
+        def urlopen(req, timeout=60):
+            self.seen.append(req)
+            return io.BytesIO(json.dumps({"result": {"chain": "main"}, "error": None}).encode())
+        p = mock.patch("urllib.request.urlopen", urlopen); p.start(); self.addCleanup(p.stop)
+        self.write(self.builtin() / ".cookie", COOKIE)          # this machine's node
+
+    builtin = TestAutoDetect.builtin
+
+    def test_remote_rpcconnect_gets_no_found_cookie(self):
+        d, conf = self.node("rpcconnect=203.0.113.5\nrpcport=8332\n")
+        err, out = io.StringIO(), io.StringIO()
+        with redirect_stderr(err), redirect_stdout(out):
+            rc = w.main(["--config", str(conf), "info"])
+        self.assertEqual(rc, 1); self.assertEqual(self.seen, [])
+        msg = err.getvalue()
+        self.assertIn("the node at 203.0.113.5 is not on this machine", msg)
+        for hint in ("--rpc-cookie", "rpccookiefile=", "rpcuser/rpcpassword", str(conf)): self.assertIn(hint, msg)
+        self.assertNotIn(SECRET, msg + out.getvalue())
+
+    def test_remote_rpc_host_gets_no_found_cookie(self):
+        d, conf = self.node()
+        for host in ("198.51.100.9", "node.example.com", "0.0.0.0", "10.0.0.2"):
+            with self.subTest(host=host):
+                msg = self.error("--config", str(conf), "--rpc-host", host)
+                self.assertIn(f"the node at {host} is not on this machine", msg)
+        self.assertEqual(self.seen, [])
+
+    def test_remote_node_with_the_confs_login(self):
+        # RUN-YOUR-OWN-NODE section 7: rpcuser/rpcpassword for a node elsewhere
+        d, conf = self.node("rpcconnect=203.0.113.5\nrpcport=8332\nrpcuser=u\nrpcpassword=p\n")
+        rpc = w.RPC(self.args("--config", str(conf)))
+        rpc.call("getblockchaininfo")
+        self.assertEqual(self.seen[0].full_url, "http://203.0.113.5:8332/")
+        self.assertEqual(self.seen[0].get_header("Authorization"), "Basic " + base64.b64encode(b"u:p").decode())
+
+    def test_remote_node_with_a_named_cookie(self):
+        copy = self.write(self.root / "remote.cookie", "__cookie__:remote\n")
+        d, conf = self.node(f"rpcconnect=203.0.113.5\nrpccookiefile={copy}\n")
+        self.assertEqual(self.creds("--config", str(conf))[:2], ("__cookie__", "remote"))
+        self.assertEqual(self.creds("--config", str(conf), "--rpc-host", "198.51.100.9", "--rpc-cookie", str(copy))[:2],
+                         ("__cookie__", "remote"))
+
+    def test_remote_node_with_env_login(self):
+        d, conf = self.node("rpcconnect=203.0.113.5\n")
+        os.environ.update(XCOIN_RPC_USER="envu", XCOIN_RPC_PASSWORD="envp")
+        self.assertEqual(self.creds("--config", str(conf)), ("envu", "envp", "XCOIN_RPC_USER/XCOIN_RPC_PASSWORD"))
+
+    def test_this_machine_by_any_name(self):
+        for host in ("127.0.0.1", "127.0.0.2", "localhost", "LOCALHOST", "::1", "[::1]"):
+            with self.subTest(host=host):
+                d, conf = self.node(f"rpcconnect={host}\nrpcport=8332\n")
+                self.assertEqual(self.creds("--config", str(conf))[:2], ("__cookie__", SECRET))
 
 class TestErrors(Creds):
     def test_missing_names_every_place_tried_and_what_to_do(self):
         d, conf = self.node(cookie=None)
         msg = self.error("--config", str(conf))
         self.assertIn("RPC credentials missing", msg)
-        for p in (d / ".cookie", self.home / ".xcoin" / ".cookie"): self.assertIn(str(p), msg)
+        builtin = self.home / ("Library/Application Support/NEX" if sys.platform == "darwin" else ".nex")
+        for p in (d / ".cookie", builtin / ".cookie"): self.assertIn(str(p), msg)
         for hint in ("--config <the node's conf>", "--rpc-cookie", "--explorer https://superknet.com", "testneta/"):
             self.assertIn(hint, msg)
         self.assertNotIn("no such file", msg)
@@ -255,6 +377,7 @@ class TestConf(Creds):
     def test_comments_anywhere_on_a_line(self):
         d, conf = self.node("# a node conf\nrpcport=19432   # testnet A\nrpcconnect=10.0.0.2#lan\n[main] # section\nrpcuser=u # me\n")
         self.assertEqual(w.parse_conf(conf), {"rpcport": "19432", "rpcconnect": "10.0.0.2", "rpcuser": "u"})
+        os.environ.update(XCOIN_RPC_PASSWORD="envp")                # a remote node gets no cookie found here
         rpc = w.RPC(self.args("--config", str(conf)))
         self.assertEqual((rpc.host, rpc.port), ("10.0.0.2", 19432))
 
@@ -303,13 +426,38 @@ class TestWire(Creds):
         self.assertIn(f"rpcuser/rpcpassword in {conf}", str(cm.exception))
         self.assertNotIn(SECRET, str(cm.exception))
 
+    def test_leftover_cookie_is_not_sent_for_a_password_conf(self):
+        # the node reads rpcpassword= and writes no cookie: a .cookie beside its conf is from an
+        # earlier crash; the conf's login goes out, and a refusal points at it, not at a cookie
+        seen = self.fake(401)
+        d, conf = self.node(f"rpcport=8332\nrpcuser=u\nrpcpassword={SECRET}\n")
+        with self.assertRaises(w.WalletError) as cm: w.RPC(self.args("--config", str(conf))).call("getblockchaininfo")
+        self.assertEqual(seen[0].get_header("Authorization"), "Basic " + base64.b64encode(f"u:{SECRET}".encode()).decode())
+        self.assertIn(f"refused the RPC login from rpcuser/rpcpassword in {conf}", str(cm.exception))
+        self.assertIn("check it matches the node's rpcuser/rpcpassword", str(cm.exception))
+        self.assertNotIn("cookie", str(cm.exception)); self.assertNotIn(SECRET, str(cm.exception))
+
+    def test_default_port_is_the_nodes_for_the_confs_chain(self):
+        # src/chainparamsbase.cpp: 8332 mainnet, 19432 testnet A, 18443 regtest
+        for conf_text, port in (("server=1\n", 8332), ("chain=main\n", 8332), ("testnet=1\n", 19432),
+                                ("chain=test\n", 19432), ("regtest=1\n", 18443), ("testnet=1\nrpcport=19555\n", 19555)):
+            with self.subTest(conf_text=conf_text):
+                d, conf = self.node(conf_text)
+                self.write(d / "testneta" / ".cookie", COOKIE); self.write(d / "regtest" / ".cookie", COOKIE)
+                self.assertEqual(w.RPC(self.args("--config", str(conf))).port, port)
+        self.assertEqual(w.RPC(self.args("--config", str(conf), "--rpc-port", "8332")).port, 8332)
+
     def test_wrong_default_port_is_explained(self):
         def urlopen(req, timeout=60): raise urllib.error.URLError(ConnectionRefusedError(61, "Connection refused"))
         p = mock.patch("urllib.request.urlopen", urlopen); p.start(); self.addCleanup(p.stop)
         d, conf = self.node("server=1\n")                          # no rpcport=
         with self.assertRaises(w.WalletError) as cm: w.RPC(self.args("--config", str(conf))).call("getblockchaininfo")
-        self.assertIn("127.0.0.1:9432", str(cm.exception)); self.assertIn("pass the node's --rpc-port", str(cm.exception))
+        self.assertIn("127.0.0.1:8332", str(cm.exception)); self.assertIn("pass the node's --rpc-port", str(cm.exception))
+        self.assertIn("default port for mainnet", str(cm.exception))
         self.assertNotIn(SECRET, str(cm.exception))
+        d, conf = self.node("testnet=1\n", sub="testneta")
+        with self.assertRaises(w.WalletError) as cm: w.RPC(self.args("--config", str(conf))).call("getblockchaininfo")
+        self.assertIn("127.0.0.1:19432", str(cm.exception)); self.assertIn("default port for testnet A", str(cm.exception))
         with self.assertRaises(w.WalletError) as cm: w.RPC(self.args("--config", str(conf), "--rpc-port", "8332")).call("getblockchaininfo")
         self.assertNotIn("--rpc-port", str(cm.exception))
 
@@ -318,7 +466,7 @@ class TestWire(Creds):
         err = io.StringIO()
         with redirect_stderr(err), redirect_stdout(io.StringIO()):
             rc = w.main(["--config", str(conf), "info"])
-        self.assertEqual(rc, 1); self.assertTrue(err.getvalue().startswith("error: RPC credentials missing"))
+        self.assertEqual(rc, 1); self.assertTrue(err.getvalue().startswith("error: RPC credentials missing"), err.getvalue()[:300])
         self.assertNotIn("Traceback", err.getvalue())
 
     def test_explorer_needs_no_login(self):

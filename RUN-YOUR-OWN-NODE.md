@@ -76,9 +76,10 @@ No `rpcuser`/`rpcpassword`: the node then writes a fresh random login to `.cooki
 its data directory at every start (testnet A: `testneta/.cookie`), and the wallet reads
 it from there on every run. Start the node (`nexd -conf=$HOME/.xcoin/nex.conf`, or with
 `-datadir=`), let it sync, then point the wallet at the same conf (`--config`, default
-`~/.xcoin/nex.conf`): it finds the cookie beside the conf, in its `datadir=`, or in the
-node's default data directory (`~/Library/Application Support/NEX` on macOS, `~/.nex`
-on Linux). `--rpc-cookie <datadir>/.cookie` names it directly.
+`~/.xcoin/nex.conf`): it finds the cookie in the conf's `datadir=` when set, else beside
+the conf or in the node's default data directory (`~/Library/Application Support/NEX` on
+macOS, `~/.nex` on Linux). `--rpc-cookie <datadir>/.cookie` names it directly. A cookie
+the wallet finds itself is sent only to a node on this machine (§7 for a node elsewhere).
 
 ### Testnet (what this repo is currently exercised against)
 
@@ -125,6 +126,9 @@ can control the node. If you ever front a node for others (a shared/public RPC):
 
 - Bind RPC to `127.0.0.1` only and reach it through a proxy/tunnel — never bind to
   `0.0.0.0`.
+- The wallet sends a cookie it finds itself only to `127.0.0.1`, `::1` or `localhost`.
+  To reach a node elsewhere (`rpcconnect=` or `--rpc-host`), put that node's
+  `rpcuser`/`rpcpassword` in the wallet's conf, or give `--rpc-cookie` a copy of its cookie.
 - Use a long random `rpcpassword` and **`-rpcwhitelist`** to allow only the methods
   the wallet needs — scantxoutset, createrawtransaction, decoderawtransaction,
   estimatesmartfee, getblockchaininfo, getblockcount, getblockhash, getblock,
