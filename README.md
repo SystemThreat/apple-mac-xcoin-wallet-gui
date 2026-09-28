@@ -2,6 +2,51 @@
 
 A minimal, auditable **post-quantum** command-line wallet for xCoin (XID).
 
+## Quick start: check a balance and send
+
+`xcoin-wallet` is the installed command (`./build.sh && ./install.sh`, see
+[Build & install](#build--install)); in the checkout, `./xcoin-wallet-cli` is the same.
+Wallet-wide options (`--explorer`, `--config`, `--file`, …) go before the command.
+`send` shows a preview and asks you to type `SEND`; run it with `--dry-run` first:
+that builds and signs the transaction and sends nothing.
+
+**(a) No node.** The public explorer reports balances and relays the one signed
+transaction; keys and signing stay on your Mac.
+
+```bash
+alias xw='xcoin-wallet --explorer https://superknet.com --hrp xpa'   # mainnet, xpa1r… addresses
+
+xw balance                                   # file wallet (~/.xcoin/wallet.mmm): asks its passphrase, if any
+xw --file ~/.xcoin/wallet001.mmm balance     # card wallet: tap the card when asked
+xw send <xpa1r…address> 2.5 --dry-run        # preview + sign, nothing sent
+xw send <xpa1r…address> 2.5                  # the real send: type SEND
+```
+
+**(b) Your own node.** Point `--config` at the node's own conf: the wallet reads its
+`rpcport=` and finds the node's `.cookie` itself (in the conf's `datadir=`, else beside
+the conf; testnet A in `testneta/`). Or name the cookie with `--rpc-cookie`. The node
+writes a new cookie at every start; the wallet reads it fresh on every run.
+
+```bash
+xcoin-wallet --config /path/to/datadir/nex.conf balance
+xcoin-wallet --config /path/to/datadir/nex.conf send <xpa1r…address> 2.5 --dry-run
+xcoin-wallet --rpc-cookie /path/to/datadir/.cookie --rpc-port 8332 balance
+```
+
+If the cookie is not there (or with no `--config`), the wallet looks in `~/.xcoin` and in
+the node's default data directory (`~/Library/Application Support/NEX` on macOS, `~/.nex` on
+Linux). If the conf has no `rpcport=`, add `--rpc-port` (the node's default: 8332
+mainnet, 19432 testnet A). The login is taken from the first of: `--rpc-user`/`--rpc-password`,
+`--rpc-cookie`, `rpccookiefile=` in the conf, the node's `.cookie` found as above,
+`rpcuser`/`rpcpassword` in the conf, and last the `XCOIN_RPC_USER`/`XCOIN_RPC_PASSWORD`
+environment variables (kept for old setups; least preferred).
+
+**MMM** (Mac Metal Miner): its WALLET tab does the same node-less send, card tap
+included. It runs this CLI with `--explorer` (the explorer URL set in MMM's SETUP:
+`https://superknet.com`) and asks for Touch ID before every send.
+
+## What it is
+
 Every Xcoin address is a witness v3 script tree over **post-quantum keys only**: an
 **ML-DSA-65** (FIPS 204) leaf plus an **SLH-DSA-SHA2-128s** (FIPS 205, hash-based)
 fallback leaf from the same key position. Addresses look like `xpa1r…` (`txa1r…` on
@@ -85,8 +130,10 @@ if you want a paper backup that survives losing both the file and the passphrase
 
 ## Commands
 
-Global options: `--file <wallet>`, `--config <nex.conf>`, `--rpc-host/-port/-user/-password`,
-`--json` (machine-readable output for every command).
+Global options: `--file <wallet>`, `--config <nex.conf>` (the wallet's or the node's own),
+`--rpc-cookie <file>`, `--rpc-host/-port/-user/-password`, `--explorer <url>`, `--hrp xpa|txa`,
+`--json` (machine-readable output for every command). How the node login is found:
+see the quick start.
 
 | Command | What it does |
 |---|---|
@@ -389,7 +436,7 @@ nothing persists. They exist only to run the wallet headless/scripted.
 
 | Variable | Kind | When / why |
 |---|---|---|
-| `XCOIN_RPC_USER` / `XCOIN_RPC_PASSWORD` | **secret** | Node RPC login, used only if not passed via `--rpc-user/--rpc-password` or found in `nex.conf`. Keeps the RPC password off the command line (where `ps` would show it). This is the *node's* password, not your seed. |
+| `XCOIN_RPC_USER` / `XCOIN_RPC_PASSWORD` | **secret** | Node RPC login, kept for old setups and the least preferred: used only when no `--rpc-user/--rpc-password`, no cookie (`--rpc-cookie`, `rpccookiefile=`, or the node's `.cookie` found from `--config`) and no `rpcuser`/`rpcpassword` in the conf. Prefer the node's cookie: no password in any file, flag or environment variable. This is the *node's* password, not your seed. |
 | `HOME` | config | Locates `~/.xcoin/`. Standard; set by your shell. |
 | `XCOIN_CARD_TIMEOUT` | config | Seconds to wait for a card tap (default 60, 5..300). The wait watches the reader's PICC interface with `SCardGetStatusChange` and connects once the card is there. |
 | `XCOIN_EVENTS` | config | `1`: machine-readable progress on stderr for a parent program (MMM): `XCOIN-EVENT card-wait <s>` before every card tap (unlock, `new --card`, `card-backup`, `card-test`, `card-reset`) and `card-ok` after it succeeds; `card-retry <attempt>` when the reader reset the card (or lost it) mid-read and the read is tried again (attempt 1 or 2; the card stays on the reader; never during a write); `card-backup --auto-swap` adds `card-swap` (take the wallet card off, place a blank one), `card-removed`, `card-provisioning` (the commit point of the backup, like `broadcast-begin`: a strict write, so a parent already gone means nothing is written; then a 0.5 s pause in which a cancel already on its way still stops the run with the blank card untouched; from the first write until the backup's key file is sealed, SIGTERM and SIGPIPE are ignored so the card is never left half written) and `done`; `new --card` sends `card-provisioning` the same way once the blank card passed its checks (same strict write and pause), and holds SIGTERM and SIGPIPE off from its first write until the card is sealed and the wallet file is written (its passphrase is asked before the card is touched); `signing <i> <n>`; `broadcast-begin <n>` just before the first broadcast (from here the parent must not stop the CLI; a 0.5 s pause follows so a cancel already on its way lands before anything is sent; if the parent quits or dies, the CLI still attempts every broadcast: SIGPIPE is ignored and output to a closed pipe is dropped); `broadcast <i> <n> <txid>` per accepted transaction (also when the network answers it already has it); `rejected <i> <n> <reason>` just before the error when the explorer or node refused the first transaction, or the node path's own check refused transaction `<i>` before anything went out (nothing was sent; `<reason>` is one token such as `missing-inputs`, `replacement-failed`, `insufficient-fee` or `bad-txns-inputs-missingorspent`); `done`. |
@@ -400,7 +447,8 @@ nothing persists. They exist only to run the wallet headless/scripted.
 variable** — anywhere. `XCOIN_WALLET_PASSPHRASE` is **deliberately refused**: if it is
 set, the CLI exits immediately (code 2), because an environment variable is readable
 by every process you run and tends to land in shell history. The only secret that may
-live in env is the node's RPC password — the node's secret, not yours.
+live in env is the node's RPC password — the node's secret, not yours, and only for
+old setups: the node's `.cookie` needs no secret anywhere.
 
 **Automation** uses a file descriptor instead: the top-level `--passphrase-fd N`
 option reads the passphrase from fd `N`, so it never appears in the command line,

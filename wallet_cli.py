@@ -732,13 +732,19 @@ def write_seed(path, seed, passphrase=None):
     put(p)
 
 def parse_conf(path):
+    """key=value lines of a nex.conf. As in the node (src/common/config.cpp), `#` starts a
+    comment anywhere on a line, except in an rpcpassword= value (the node refuses one with
+    `#`; this wallet always read it whole). Section headers are skipped, their keys kept."""
     out = {}
     try:
-        for line in Path(path).read_text().splitlines():
+        for line in Path(path).expanduser().read_text().splitlines():
             line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
+            if line.partition("=")[0].strip() != "rpcpassword": line = line.split("#", 1)[0].strip()
+            if line and "=" in line:
                 k, v = line.split("=", 1); out[k.strip()] = v.strip()
     except FileNotFoundError: pass
+    except OSError as e: raise WalletError(f"cannot read the config {path}: {e.strerror or type(e).__name__}")
+    except UnicodeDecodeError: raise WalletError(f"cannot read the config {path}: not a text file")
     return out
 
 # ── bech32m + local transaction tooling (for the --explorer backend) ─────────
@@ -955,15 +961,125 @@ def make_backend(args):
     if getattr(args, "hrp", None): rpc._hrp = args.hrp
     return rpc
 
+# ── node RPC login ───────────────────────────────────────────────────────────
+# A node started without rpcpassword= writes a fresh random login to <datadir>/.cookie
+# at every start (mode 0600, removed at shutdown): src/rpc/request.cpp, ".cookie" under
+# the chain's data directory. Mainnet keeps it in the data directory itself, the other
+# chains in a subdirectory (src/chainparamsbase.cpp).
+NODE_CHAIN_SUBDIR = {"main": "", "test": "testneta", "regtest": "regtest"}
+COOKIE_MAX_BYTES = 4096
+
+def node_default_datadirs():
+    """Data directories a node may use when no conf says where: ~/.xcoin (a node run with
+    -datadir=~/.xcoin, beside the wallet), then the node's built-in default
+    (src/common/args.cpp GetDefaultDataDir: ~/Library/Application Support/NEX on macOS,
+    ~/.nex elsewhere)."""
+    home = Path.home()
+    return [home / ".xcoin", home / "Library" / "Application Support" / "NEX" if sys.platform == "darwin" else home / ".nex"]
+
+def conf_flag(value):
+    """The node's reading of a boolean conf value (InterpretBool): empty is true, else the leading integer != 0."""
+    m = re.match(r"\s*[+-]?\d+", value)
+    return value.strip() == "" or bool(m and int(m.group()) != 0)
+
+def conf_chain(conf):
+    """The chain a node conf selects with chain=, testnet= or regtest=; None when it names none (mainnet)."""
+    chain = conf.get("chain", "").strip().lower()
+    if chain: return {"main": "main", "test": "test", "regtest": "regtest"}.get(chain)
+    if "regtest" in conf and conf_flag(conf["regtest"]): return "regtest"
+    if "testnet" in conf and conf_flag(conf["testnet"]): return "test"
+    return None
+
+def node_datadir(conf, conf_path):
+    """The data directory of the node that reads `conf_path`: its datadir= when set,
+    else the conf's own directory (a node run with -datadir=D keeps its conf in D)."""
+    base = conf_path.expanduser().absolute().parent
+    d = conf.get("datadir")
+    if not d: return base
+    d = Path(d).expanduser()
+    return d if d.is_absolute() else base / d
+
+def read_cookie(path):
+    """(user, password) from a node's RPC cookie, one line `__cookie__:<random>`. Read fresh
+    on every run: the node writes a new one at every start. Errors name the file and what
+    to do about it, never what is in it."""
+    p = Path(path).expanduser()
+    try:
+        with open(p, "rb") as f: raw = f.read(COOKIE_MAX_BYTES + 1)
+    except FileNotFoundError:
+        raise WalletError(f"no RPC cookie at {p}: the node writes it at every start and removes it when it stops. "
+                          "Is the node running, and is this its data directory? (a testnet A node writes <datadir>/testneta/.cookie)")
+    except IsADirectoryError:
+        raise WalletError(f"{p} is a directory: give the cookie file in it ({p / '.cookie'})")
+    except PermissionError:
+        raise WalletError(f"cannot read the RPC cookie {p}: permission denied. Only the user that runs the node can read it: "
+                          "run the wallet as that user, or start the node with -rpccookieperms=group")
+    except OSError as e:
+        raise WalletError(f"cannot read the RPC cookie {p}: {e.strerror or type(e).__name__}")
+    try: text = raw.decode("utf-8").strip()
+    except UnicodeDecodeError: text = ""
+    user, sep, password = text.partition(":")
+    if len(raw) > COOKIE_MAX_BYTES or not (sep and user and password) or any(c in text for c in "\r\n"):
+        raise WalletError(f"{p} is not a node RPC cookie (one line, user:password): "
+                          "point --rpc-cookie at the .cookie file in the node's data directory")
+    return user, password
+
+def rpc_credentials(args, conf):
+    """The node RPC login as (user, password, source); the first of these that is set wins:
+      1. --rpc-user/--rpc-password
+      2. --rpc-cookie FILE
+      3. rpccookiefile= in the conf (relative: to the node's chain data directory, as the node reads it)
+      4. the node's own .cookie, found from --config (its datadir= or the conf's own directory,
+         plus the chain's subdirectory), else in ~/.xcoin or the node's default data directory
+      5. rpcuser/rpcpassword in the conf
+      6. XCOIN_RPC_USER/XCOIN_RPC_PASSWORD, kept for old setups and the least preferred: an
+         environment variable is readable by every program you run.
+    `source` says where the login came from, never what it is."""
+    conf_path = Path(args.config).expanduser()
+    env_user, env_password = os.getenv("XCOIN_RPC_USER"), os.getenv("XCOIN_RPC_PASSWORD")
+    if args.rpc_user or args.rpc_password:
+        user = args.rpc_user or conf.get("rpcuser") or env_user
+        password = args.rpc_password or conf.get("rpcpassword") or env_password
+        if user and password: return user, password, "--rpc-user/--rpc-password"
+        raise WalletError(f"RPC login incomplete: give {'--rpc-password' if user else '--rpc-user'} too, "
+                          "or drop both and let the wallet read the node's .cookie (--config <the node's conf> or --rpc-cookie FILE)")
+    cookie = getattr(args, "rpc_cookie", None)
+    if cookie:
+        return (*read_cookie(cookie), f"the cookie {Path(cookie).expanduser()}")
+    subdir = NODE_CHAIN_SUBDIR[conf_chain(conf) or "main"]
+    if conf.get("rpccookiefile"):
+        p = Path(conf["rpccookiefile"]).expanduser()
+        if not p.is_absolute(): p = node_datadir(conf, conf_path) / subdir / p
+        return (*read_cookie(p), f"the cookie {p} (rpccookiefile= in {conf_path})")
+    tried, unreadable = [], []
+    for d in dict.fromkeys([node_datadir(conf, conf_path)] + node_default_datadirs()):
+        p = d / subdir / ".cookie"
+        tried.append(str(p))
+        if not p.exists(): continue
+        try: user, password = read_cookie(p)
+        except WalletError as e: unreadable.append(str(e)); continue
+        return user, password, f"the node's cookie {p}"
+    user, password = conf.get("rpcuser") or env_user, conf.get("rpcpassword") or env_password
+    if user and password:
+        from_conf = [bool(conf.get("rpcuser")), bool(conf.get("rpcpassword"))]
+        source = (f"rpcuser/rpcpassword in {conf_path}" if all(from_conf) else
+                  "XCOIN_RPC_USER/XCOIN_RPC_PASSWORD" if not any(from_conf) else
+                  f"rpcuser/rpcpassword from {conf_path} and XCOIN_RPC_USER/XCOIN_RPC_PASSWORD")
+        return user, password, source
+    raise WalletError("RPC credentials missing: " + (" ".join(unreadable) + " " if unreadable else "") +
+                      f"found no node cookie (looked at {', '.join(tried)}) and no rpcuser/rpcpassword in {conf_path}"
+                      f"{'' if conf_path.exists() else ' (no such file)'}. Start the node (it writes .cookie in its "
+                      "data directory at every start; testnet A in testneta/), then point the wallet at it: "
+                      "--config <the node's conf> or --rpc-cookie <path to .cookie>. No node? Use --explorer https://superknet.com")
+
 class RPC:
     def __init__(self, args):
-        self.conf = parse_conf(args.config)
+        self.conf, self.conf_path = parse_conf(args.config), Path(args.config).expanduser()
         self.host = args.rpc_host or self.conf.get("rpcconnect", "127.0.0.1")
-        self.port = args.rpc_port or int(self.conf.get("rpcport", "9432"))
-        self.user = args.rpc_user or self.conf.get("rpcuser") or os.getenv("XCOIN_RPC_USER")
-        self.password = args.rpc_password or self.conf.get("rpcpassword") or os.getenv("XCOIN_RPC_PASSWORD")
-        if not self.user or not self.password:
-            raise WalletError("RPC credentials missing; set them in nex.conf or use --rpc-user/--rpc-password")
+        try: self.port = args.rpc_port or int(self.conf.get("rpcport", "9432"))
+        except ValueError: raise WalletError(f"rpcport= in {self.conf_path} is not a port number")
+        self.port_guessed = not (args.rpc_port or self.conf.get("rpcport"))
+        self.user, self.password, self.auth_source = rpc_credentials(args, self.conf)
     def call(self, method, params=None, timeout=60):
         body = json.dumps({"jsonrpc": "1.0", "id": "xcoin-wallet", "method": method,
                            "params": params or []}, default=jdefault).encode()
@@ -975,12 +1091,20 @@ class RPC:
             with urllib.request.urlopen(req, timeout=timeout) as response:
                 result = json.load(response, parse_float=Decimal)
         except urllib.error.HTTPError as e:
+            if e.code == 401:
+                raise WalletError(f"the node at {self.host}:{self.port} refused the RPC login from {self.auth_source} (HTTP 401): "
+                                  + ("is that the cookie of the node on this port? The node writes a new one at every start, "
+                                     "and one left behind by a node that did not shut down cleanly is stale"
+                                     if self.auth_source.startswith(("the cookie", "the node's cookie"))
+                                     else "check it matches the node's rpcuser/rpcpassword"))
             # The node answers RPC-level errors with HTTP 500 + a JSON body;
             # surface the real message instead of a generic connection error.
             try: result = json.loads(e.read().decode(), parse_float=Decimal)
             except Exception: raise WalletError(f"RPC {method} failed: HTTP {e.code}")
         except Exception as e:
-            raise WalletError(f"cannot reach nexd RPC at {self.host}:{self.port}: {e}")
+            raise WalletError(f"cannot reach nexd RPC at {self.host}:{self.port}: {e}" + (
+                f" (no rpcport= in {self.conf_path} and no --rpc-port, so this is the wallet's default port: "
+                "pass the node's --rpc-port; a node's own default is 8332 on mainnet, 19432 on testnet A)" if self.port_guessed else ""))
         err = result.get("error")
         if err:
             msg = err.get("message", err) if isinstance(err, dict) else err
@@ -2063,11 +2187,16 @@ def cmd_reset(args):
 
 def parser():
     p = argparse.ArgumentParser(prog="xcoin-wallet", description="Post-quantum Xcoin self-custody wallet")
-    p.add_argument("--file", default=str(default_wallet())); p.add_argument("--config", default=str(DEFAULT_CONFIG))
-    p.add_argument("--rpc-host"); p.add_argument("--rpc-port", type=int); p.add_argument("--rpc-user"); p.add_argument("--rpc-password")
+    p.add_argument("--file", default=str(default_wallet()))
+    p.add_argument("--config", default=str(DEFAULT_CONFIG), help="conf to read rpcport= etc. from: the wallet's nex.conf or your node's own conf, "
+                   "whose .cookie is then found in its datadir= or its directory (default: %(default)s)")
+    p.add_argument("--rpc-host"); p.add_argument("--rpc-port", type=int)
+    p.add_argument("--rpc-cookie", metavar="FILE", help="the node's cookie file, <datadir>/.cookie (testnet A: <datadir>/testneta/.cookie); "
+                   "read fresh every run. Without it the wallet looks for the cookie itself")
+    p.add_argument("--rpc-user"); p.add_argument("--rpc-password", help="a password on the command line shows in `ps`: prefer the node's cookie")
     p.add_argument("--json", action="store_true", help="machine-readable JSON output")
     p.add_argument("--explorer", metavar="URL", help="use a public explorer (e.g. superknet.com) instead of a local node: balance/UTXOs/fees/broadcast go through its JSON API; keys and signing stay on this Mac (env: XCOIN_EXPLORER)")
-    p.add_argument("--hrp", choices=("xpa", "txa"), help="address HRP: xpa mainnet, txa testnet A (default: asked of the node, or txa via --explorer)")
+    p.add_argument("--hrp", choices=("xpa", "txa"), help="address HRP: xpa mainnet, txa testnet A (default: asked of the node or the explorer; txa if the explorer does not answer)")
     p.add_argument("--passphrase-fd", type=int, metavar="N", help="read the wallet passphrase from file descriptor N (a pipe from a parent program); never from the environment")
     sub = p.add_subparsers(dest="command", required=True)
     q = sub.add_parser("new", help="create a new wallet")

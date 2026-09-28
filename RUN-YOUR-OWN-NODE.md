@@ -67,12 +67,18 @@ server=1
 listen=1
 rpcbind=127.0.0.1
 rpcallowip=127.0.0.1
-rpcuser=CHOOSE_A_USER
-rpcpassword=CHOOSE_A_LONG_RANDOM_PASSWORD
+# the node's mainnet RPC port, written out so the wallet uses it too:
+rpcport=8332
 # txindex=1        # only if you want full `history` across the chain
 ```
 
-Start the node (`nexd`), let it sync, then the wallet talks to it over localhost.
+No `rpcuser`/`rpcpassword`: the node then writes a fresh random login to `.cookie` in
+its data directory at every start (testnet A: `testneta/.cookie`), and the wallet reads
+it from there on every run. Start the node (`nexd -conf=$HOME/.xcoin/nex.conf`, or with
+`-datadir=`), let it sync, then point the wallet at the same conf (`--config`, default
+`~/.xcoin/nex.conf`): it finds the cookie beside the conf, in its `datadir=`, or in the
+node's default data directory (`~/Library/Application Support/NEX` on macOS, `~/.nex`
+on Linux). `--rpc-cookie <datadir>/.cookie` names it directly.
 
 ### Testnet (what this repo is currently exercised against)
 
