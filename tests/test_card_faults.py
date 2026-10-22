@@ -28,6 +28,11 @@ import test_card_seed as S
 REAL_PCSC = cs.PCSCTransport                  # before any test swaps in a fake reader
 
 RESET, REMOVED = 0x80100068, 0x80100069     # SCARD_W_RESET_CARD, SCARD_W_REMOVED_CARD
+
+def pipe():
+    """The SIGPIPE disposition in force. Windows has no SIGPIPE: a write to a gone parent raises OSError,
+    which the CLI swallows, so there it is always as good as ignored."""
+    return signal.getsignal(signal.SIGPIPE) if hasattr(signal, "SIGPIPE") else signal.SIG_IGN
 HINT = "If this keeps happening, unplug the card reader, plug it back in, and try again."
 
 # --- stand-ins for every pyscard exception class: same names, bases and modules ---------------
@@ -510,7 +515,7 @@ class TestProvisioningCommit(Faulty):
             t = real(); inner = t.transmit
             def transmit(apdu):
                 if self.reader.card is blank:
-                    line.append(("apdu", bytes(apdu)[1], signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGPIPE)))
+                    line.append(("apdu", bytes(apdu)[1], signal.getsignal(signal.SIGTERM), pipe()))
                 return inner(apdu)
             t.transmit = transmit; return t
         os.environ["XCOIN_EVENTS"] = "1"
@@ -568,7 +573,7 @@ class TestProvisioningCommit(Faulty):
         def transport():
             t = real(); inner = t.transmit
             def transmit(apdu):
-                if self.reader.card is blank: line.append(("apdu", bytes(apdu)[1], term(), signal.getsignal(signal.SIGPIPE)))
+                if self.reader.card is blank: line.append(("apdu", bytes(apdu)[1], term(), pipe()))
                 return inner(apdu)
             t.transmit = transmit; return t
         def sleep(sec):                                   # the CLI's own pause only (subprocess polls with time.sleep too)

@@ -3,7 +3,7 @@
 broadcast, dry run, and the XCOIN-EVENT progress lines. RPC and signing are faked;
 nothing is broadcast anywhere."""
 
-import hashlib, io, json, os, subprocess, sys, time, unittest, urllib.error
+import hashlib, io, json, os, signal, subprocess, sys, time, unittest, urllib.error
 from contextlib import redirect_stderr, redirect_stdout
 from decimal import Decimal
 from pathlib import Path
@@ -389,7 +389,7 @@ sys.exit(w.main(["--file", str(b.wallet), "--config", "/nonexistent", *sys.argv[
         rc, out, err, _ = self.send("--json", "send", T.DEST, "3333", "--split", "--yes")   # the same send, pipes open
         planned = json.loads(out)["txids"]; self.assertEqual(len(planned), 4)
         for argv in (("--json",), ()):
-            for sigpipe in ("python", "default"):
+            for sigpipe in ("python", "default") if hasattr(signal, "SIGPIPE") else ("python",):   # Windows has no SIGPIPE
                 with self.subTest(argv=argv, sigpipe=sigpipe):
                     for f in ("closed", "tried"): (Path(self.tmp.name) / f).unlink(missing_ok=True)
                     rc, tried = self.run_orphan(*argv, "send", T.DEST, "3333", "--split", "--yes", sigpipe=sigpipe)

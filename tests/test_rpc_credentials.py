@@ -13,6 +13,11 @@ import wallet_cli as w
 
 SECRET = "c0ffee5ecret" * 4            # stands for any cookie password; must never be printed
 COOKIE = f"__cookie__:{SECRET}\n"
+BUILTIN = {"darwin": "Library/Application Support/NEX", "win32": "AppData/Local/NEX"}   # under the home; ~/.nex elsewhere
+
+def unreadable_files():
+    """chmod 0 makes a file unreadable on macOS and Linux, unless we are root. Windows ignores the mode."""
+    return os.name != "nt" and os.geteuid() != 0
 
 class Creds(unittest.TestCase):
     def setUp(self):
@@ -22,6 +27,8 @@ class Creds(unittest.TestCase):
         env = {k: v for k, v in os.environ.items()
                if k not in ("XCOIN_RPC_USER", "XCOIN_RPC_PASSWORD", "XCOIN_EXPLORER", "XCOIN_WALLET_PASSPHRASE")}
         env["HOME"] = str(self.home)       # ~/.xcoin and the node's default datadir live here
+        env["USERPROFILE"] = str(self.home)                               # Windows' home
+        env["APPDATA"] = str(self.home / "AppData" / "Roaming"); env["LOCALAPPDATA"] = str(self.home / "AppData" / "Local")
         p = mock.patch.dict(os.environ, env, clear=True); p.start(); self.addCleanup(p.stop)
 
     def write(self, path, text, mode=0o600):
@@ -147,7 +154,7 @@ class TestOrder(Creds):
 class TestAutoDetect(Creds):
     def builtin(self):
         """The node's built-in data directory under the test HOME."""
-        return self.home / ("Library/Application Support/NEX" if sys.platform == "darwin" else ".nex")
+        return self.home / BUILTIN.get(sys.platform, ".nex")
 
     def test_datadir_in_conf(self):
         data = self.root / "chaindata"
@@ -228,7 +235,7 @@ class TestAutoDetect(Creds):
 
     def test_the_nodes_built_in_datadir(self):
         # a node started with only -conf=<this conf> keeps its data in the built-in directory
-        for platform, where in (("darwin", Path("Library") / "Application Support" / "NEX"), ("linux", Path(".nex"))):
+        for platform, where in (("darwin", Path(BUILTIN["darwin"])), ("linux", Path(".nex")), ("win32", Path(BUILTIN["win32"]))):
             with self.subTest(platform=platform), mock.patch.object(w.sys, "platform", platform):
                 self.write(self.home / where / ".cookie", f"__cookie__:{platform}\n")
                 d, conf = self.node(cookie=None)
@@ -247,7 +254,7 @@ class TestAutoDetect(Creds):
         self.assertEqual(w.RPC(self.args("--config", str(conf))).password, "afterrestart")
 
     def test_unreadable_autodetected_cookie_falls_through_to_env(self):
-        if os.geteuid() == 0: self.skipTest("root reads any file")
+        if not unreadable_files(): self.skipTest("no unreadable files here (root, or Windows)")
         d, conf = self.node("rpcuser=confu\n", cookie=COOKIE)
         os.environ.update(XCOIN_RPC_PASSWORD="envp")
         os.chmod(d / ".cookie", 0)
@@ -318,7 +325,7 @@ class TestErrors(Creds):
         d, conf = self.node(cookie=None)
         msg = self.error("--config", str(conf))
         self.assertIn("RPC credentials missing", msg)
-        builtin = self.home / ("Library/Application Support/NEX" if sys.platform == "darwin" else ".nex")
+        builtin = self.home / BUILTIN.get(sys.platform, ".nex")
         for p in (d / ".cookie", builtin / ".cookie"): self.assertIn(str(p), msg)
         for hint in ("--config <the node's conf>", "--rpc-cookie", "--explorer https://superknet.com", "testneta/"):
             self.assertIn(hint, msg)
@@ -338,14 +345,14 @@ class TestErrors(Creds):
         self.assertIn("is a directory", msg); self.assertIn(str(d / ".cookie"), msg)
 
     def test_explicit_cookie_permission_denied(self):
-        if os.geteuid() == 0: self.skipTest("root reads any file")
+        if not unreadable_files(): self.skipTest("no unreadable files here (root, or Windows)")
         d, conf = self.node()
         os.chmod(d / ".cookie", 0); self.addCleanup(os.chmod, d / ".cookie", 0o600)
         msg = self.error("--rpc-cookie", str(d / ".cookie"))
         self.assertIn("permission denied", msg); self.assertIn("-rpccookieperms=group", msg)
 
     def test_unreadable_autodetected_cookie_is_reported(self):
-        if os.geteuid() == 0: self.skipTest("root reads any file")
+        if not unreadable_files(): self.skipTest("no unreadable files here (root, or Windows)")
         d, conf = self.node()
         os.chmod(d / ".cookie", 0); self.addCleanup(os.chmod, d / ".cookie", 0o600)
         msg = self.error("--config", str(conf))
@@ -366,7 +373,7 @@ class TestErrors(Creds):
         self.assertIn("is not a node RPC cookie", self.error("--config", str(conf)))
 
     def test_unreadable_conf_is_an_error_not_a_traceback(self):
-        if os.geteuid() == 0: self.skipTest("root reads any file")
+        if not unreadable_files(): self.skipTest("no unreadable files here (root, or Windows)")
         d, conf = self.node(f"rpcpassword={SECRET}\n")
         os.chmod(conf, 0); self.addCleanup(os.chmod, conf, 0o600)
         msg = self.error("--config", str(conf))

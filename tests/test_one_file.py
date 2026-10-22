@@ -53,7 +53,8 @@ class TestOneFile(Base):
         self.assertEqual([c["uid"] for c in cards], [d["card_uid"]])
         self.assertEqual(cards[0]["state"], "provisioned")
         self.assertNotIn("master_key", cards[0]); self.assertNotIn("write_key", cards[0])   # sealed
-        self.assertEqual(oct(self.wallet.stat().st_mode & 0o777), "0o600")
+        if os.name != "nt":   # Windows has no mode bits: the file is private through the profile folder's ACL
+            self.assertEqual(oct(self.wallet.stat().st_mode & 0o777), "0o600")
     def test_unlocks_with_card_and_passphrase_and_seed_is_never_shown(self):
         self.make()
         with redirect_stderr(io.StringIO()): seed = w.read_seed(self.wallet)

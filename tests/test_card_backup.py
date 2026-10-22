@@ -323,7 +323,7 @@ sys.exit(w.main(["--file", str(d / "w.mmm"), "--json", "card-status"]))
 '''
         repo = str(Path(__file__).resolve().parent.parent)
         with tempfile.TemporaryDirectory() as d:
-            env = {**{k: v for k, v in os.environ.items() if k not in ("XCOIN_EVENTS", "XCOIN_CARD_TIMEOUT")}, "HOME": d}
+            env = {**{k: v for k, v in os.environ.items() if k not in ("XCOIN_EVENTS", "XCOIN_CARD_TIMEOUT")}, "HOME": d, "USERPROFILE": d}
             run = lambda step: subprocess.run([sys.executable, "-c", code, repo, d, step], stdin=subprocess.DEVNULL,
                                               capture_output=True, text=True, timeout=120, env=env)
             p = run("make"); self.assertEqual(p.returncode, 0, p.stderr)

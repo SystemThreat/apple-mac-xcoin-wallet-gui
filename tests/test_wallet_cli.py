@@ -14,6 +14,7 @@ SEED = "ab" * 32
 DEST = "tnx1z0hjuu6xulyaav5wf540aelngdm5fnz4nmu2f6j739cqnk066gqrqk0mggt"
 OWN = "tnx1z6syxfhjfyp0djgp0r28c7stvp7fsrfx2zv553l8t8cv4hdrxekksxhc9cd"
 SPK = "5220" + "11" * 32
+POSIX_MODES = os.name != "nt"   # Windows has no mode bits: a wallet file is private through the profile folder's ACL
 
 def utxo(txid, vout, amount, height, tip, coinbase=False, spk=SPK):
     return {"txid": txid, "vout": vout, "amount": Decimal(amount), "scriptPubKey": spk,
@@ -329,7 +330,7 @@ class TestSeedFiles(Base):
         rc, out = self.run_cli_target(target, "new", "--offline")
         self.assertEqual(rc, 0)
         self.assertTrue(target.exists())
-        self.assertEqual(os.stat(target).st_mode & 0o777, 0o600)
+        if POSIX_MODES: self.assertEqual(os.stat(target).st_mode & 0o777, 0o600)
         self.assertTrue(target.read_bytes().startswith(w.MMM_MAGIC))
         self.assertEqual(len(w.read_seed(target)), 64)
     def test_restore_rejects_bad_seed(self):
@@ -509,7 +510,8 @@ class TestWriteSeedAtomic(unittest.TestCase):
         w.write_seed(self.target, SEED, "pw")
         self.assertEqual(self.listing(), ["wallet.mmm"])
         st = os.stat(self.target)
-        self.assertEqual((st.st_mode & 0o777, st.st_nlink), (0o600, 1))
+        self.assertEqual(st.st_nlink, 1)
+        if POSIX_MODES: self.assertEqual(st.st_mode & 0o777, 0o600)
         self.assertEqual(w.mmm_decode(self.target.read_bytes(), "pw"), SEED)
     def test_encode_failure_creates_nothing_and_retry_works(self):
         # a Python without hashlib.scrypt, or SIGTERM during the KDF
@@ -531,7 +533,7 @@ class TestWriteSeedAtomic(unittest.TestCase):
         with mock.patch.object(w.os, "link", side_effect=OSError(45, "Operation not supported")):
             w.write_seed(self.target, SEED)
             self.assertEqual(self.listing(), ["wallet.mmm"])
-            self.assertEqual(os.stat(self.target).st_mode & 0o777, 0o600)
+            if POSIX_MODES: self.assertEqual(os.stat(self.target).st_mode & 0o777, 0o600)
             with self.assertRaises(FileExistsError): w.write_seed(self.target, "cd" * 32)
             with mock.patch.object(w.os, "fsync", side_effect=OSError(28, "No space left on device")):
                 with self.assertRaises(OSError): w.write_seed(self.dir / "other.mmm", SEED)
@@ -1097,7 +1099,7 @@ class TestWalletsList(unittest.TestCase):
         self.assertEqual([r["format"] for r in rows], ["mmm2", "mmm1", "seed", "mmm4", "mmm5-card"])
         self.assertEqual([r["card"] for r in rows], [True, False, False, False, True])
         self.assertEqual([r["default"] for r in rows], [False, True, False, False, False])
-        self.assertTrue(rows[3]["file"].endswith(".dex-wallet/wallet.mmm"))
+        self.assertEqual(Path(rows[3]["file"]).parts[-2:], (".dex-wallet", "wallet.mmm"))
     def test_missing_dex_dir_is_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
             fake_home = Path(tmp)

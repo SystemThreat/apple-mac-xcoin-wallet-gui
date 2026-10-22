@@ -994,9 +994,14 @@ COOKIE_MAX_BYTES = 4096
 def node_builtin_datadir():
     """The node's built-in data directory, used by a node started without -datadir=
     (src/common/args.cpp GetDefaultDataDir): ~/Library/Application Support/NEX on macOS,
+    %APPDATA%\\NEX on Windows when it exists (older installs), else %LOCALAPPDATA%\\NEX,
     ~/.nex elsewhere."""
     home = Path.home()
-    return home / "Library" / "Application Support" / "NEX" if sys.platform == "darwin" else home / ".nex"
+    if sys.platform == "darwin": return home / "Library" / "Application Support" / "NEX"
+    if sys.platform == "win32":
+        legacy = Path(os.environ.get("APPDATA") or home / "AppData" / "Roaming") / "NEX"
+        return legacy if legacy.exists() else Path(os.environ.get("LOCALAPPDATA") or home / "AppData" / "Local") / "NEX"
+    return home / ".nex"
 
 def is_loopback(host):
     """True when `host` is this machine: localhost, 127.0.0.0/8 or ::1. A name is not
@@ -1041,13 +1046,13 @@ def read_cookie(path):
     on every run: the node writes a new one at every start. Errors name the file and what
     to do about it, never what is in it."""
     p = Path(path).expanduser()
+    if p.is_dir():   # checked first: Windows refuses to open a directory as "permission denied", not IsADirectoryError
+        raise WalletError(f"{p} is a directory: give the cookie file in it ({p / '.cookie'})")
     try:
         with open(p, "rb") as f: raw = f.read(COOKIE_MAX_BYTES + 1)
     except FileNotFoundError:
         raise WalletError(f"no RPC cookie at {p}: the node writes it at every start and removes it when it stops. "
                           "Is the node running, and is this its data directory? (a testnet A node writes <datadir>/testneta/.cookie)")
-    except IsADirectoryError:
-        raise WalletError(f"{p} is a directory: give the cookie file in it ({p / '.cookie'})")
     except PermissionError:
         raise WalletError(f"cannot read the RPC cookie {p}: permission denied. Only the user that runs the node can read it: "
                           "run the wallet as that user, or start the node with -rpccookieperms=group")
@@ -1448,7 +1453,7 @@ def offer_wipe(args):
     scrollback. ESC[3J purges scrollback too (Terminal.app, iTerm2). The seed
     stays retrievable from the wallet file (mode 600) via `xcoin-wallet seed`.
     """
-    if getattr(args, "no_clear", False) or not (sys.stdin.isatty() and sys.stdout.isatty()):
+    if getattr(args, "no_clear", False) or not (can_prompt() and sys.stdout is not None and sys.stdout.isatty()):
         return
     try:
         input("\nWrite the seed down now. Press Enter to WIPE it from screen + scrollback (Ctrl-C to leave it)... ")
@@ -1766,7 +1771,7 @@ def cmd_seed(args):
     seed = require_seed(args)
     if args.copy:
         if not args.yes:
-            if not sys.stdin.isatty():
+            if not can_prompt():
                 raise WalletError("refusing to copy the seed non-interactively; pass --yes to override")
             answer = input(f"Copy the MASTER SEED to the clipboard? Auto-clears in {args.timeout}s. [y/N] ").strip().lower()
             if answer != "y": raise WalletError("cancelled")
@@ -1782,7 +1787,7 @@ def cmd_seed(args):
         if not args.yes: raise WalletError("seed --json requires --yes (explicit confirmation to emit the seed)")
         emit_json({"file": str(args.file), "seed": seed}); return
     if not args.yes:
-        if not sys.stdin.isatty():
+        if not can_prompt():
             raise WalletError("refusing to print the seed non-interactively; pass --yes to override")
         answer = input("This prints your MASTER SEED. Anyone who sees it controls the wallet.\nType REVEAL to continue: ").strip()
         if answer != "REVEAL": raise WalletError("cancelled")
