@@ -67,6 +67,11 @@ def fake_pyscard_errors():
             ("scard.error", SCARD_ERROR("Failed to transmit with protocol T1."))]
     return out
 
+def native(hresult):
+    """An HRESULT the way the installed pyscard hands it over: a C long, so signed and 32-bit on Windows
+    (0x8010001D arrives as -2146435043; its message lookup refuses the unsigned value)."""
+    return hresult - (1 << 32) if os.name == "nt" and hresult >= 1 << 31 else hresult
+
 def real_pyscard_errors():
     """One instance of every exception class the installed pyscard defines (none: it is not installed)."""
     try:
@@ -77,8 +82,8 @@ def real_pyscard_errors():
     for mod in (SE, PE):
         for name, c in sorted(vars(mod).items()):
             if not (isinstance(c, type) and issubclass(c, BaseException) and c.__module__ == mod.__name__): continue
-            for args, kw in ((("Failed to transmit with protocol T1.",), {"hresult": RESET}), ((0x8010001D,), {}),
-                             (("x", 0x8010001D), {}), (("x",), {}), ((), {})):
+            for args, kw in ((("Failed to transmit with protocol T1.",), {"hresult": native(RESET)}), ((native(0x8010001D),), {}),
+                             (("x", native(0x8010001D)), {}), (("x",), {}), ((), {})):
                 try: out.append((f"{mod.__name__}.{name}", c(*args, **kw))); break
                 except TypeError: continue
             else: raise AssertionError(f"cannot build {name}")

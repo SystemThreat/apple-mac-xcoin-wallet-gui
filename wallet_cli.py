@@ -198,7 +198,10 @@ PCSC_PLAIN = {0x8010001D: "the Mac's smart card service did not answer", 0x80100
 def _card_fault_text(e):
     """(plain words, reader-level?) for one card or reader fault."""
     if isinstance(e, KeyboardInterrupt): return "it was interrupted", False
-    detail = " ".join(str(e).split())
+    try: detail = " ".join(str(e).split())
+    except Exception:   # pyscard's own text can fail (Windows: an HRESULT above 2^31 overflows SCardGetErrorMessage)
+        code = getattr(e, "hresult", None)
+        detail = type(e).__name__ + (f" (0x{code & 0xFFFFFFFF:08X})" if isinstance(code, int) else "")
     if not pyscard_error(e):
         cs = sys.modules.get("card_seed")
         if getattr(e, "card_fault", False) and not isinstance(e, getattr(cs, "CardError", ())):
