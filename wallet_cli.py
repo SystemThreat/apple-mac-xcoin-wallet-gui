@@ -581,6 +581,8 @@ def can_prompt():
     in its own process group (NerdMiner login) is not: reading the terminal would
     get it SIGTTIN and a silent hang, so it must report that it cannot ask and let
     the parent ask instead (the text below is what NerdMiner looks for)."""
+    if sys.stdin is None:   # a windowed program (pythonw on Windows) has no terminal at all
+        return False
     if os.name == "nt":   # Windows has no process groups on the console: a console stdin is ours to read
         return sys.stdin.isatty()
     try:

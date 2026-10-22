@@ -20,10 +20,12 @@
     if (r && r.error) throw new Error(r.error);
     return r ? r.ok : null;
   }
-  async function busy(btn, fn) {
-    const label = btn.innerHTML; btn.disabled = true; btn.innerHTML = "Working…";
-    try { return await fn(); } catch (e) { toast(e.message, "error"); } finally { btn.disabled = false; btn.innerHTML = label; }
+  async function busy(btn, fn, working = "Working…") {
+    const label = btn.innerHTML; btn.disabled = true; btn.classList.add("busy"); btn.innerHTML = working;
+    try { return await fn(); } catch (e) { relock(e); } finally { btn.disabled = false; btn.classList.remove("busy"); btn.innerHTML = label; if (btn._gate) btn._gate(); }
   }
+  // a button that stays gray until its condition holds (a passphrase typed, a box ticked), then turns solid
+  function gate(btn, ready) { const sync = () => (btn.disabled = !ready()); btn._gate = sync; sync(); return sync; }
   const XID_MARK = '<svg viewBox="0 0 1024 1024" aria-hidden="true"><rect width="1024" height="1024" fill="#c7ff2e"/><path d="M763 782H631.5L511.8 595.2 391.7 782H261L422.7 535.2H322.5v-68.5h101.3L278.3 242h127.4L514 415.5 620.1 242h126.4L602.4 466.7h99.9v68.5H599.1Z" fill="#0b0b0b"/></svg>';
 
   // ── theme ──
@@ -270,9 +272,11 @@
           <div class="total"><dt>Total leaving</dt><dd>${(Number(amount) + Number(d.fee)).toFixed(8)} XID</dd></div></dl>
           <div class="actions">${d.mempool_accept === false ? `<p class="warn">The network would refuse this transaction: ${esc(d.reject_reason || "unknown reason")}</p>` : ""}
           <label class="check"><input type="checkbox" name="sure"> Send ${esc(amount)} XID to this address. Sent XID cannot be called back.</label>
-          <button class="btn danger" data-act="send">Send now</button></div>`;
-        rv.querySelector('[data-act="send"]').onclick = (e2) => {
-          if (!rv.querySelector('[name="sure"]').checked) return toast("Tick the box to confirm.", "error");
+          <button class="btn danger" data-act="send" disabled>Send now</button></div>`;
+        const sure = rv.querySelector('[name="sure"]'), sendBtn = rv.querySelector('[data-act="send"]');
+        sure.addEventListener("change", gate(sendBtn, () => sure.checked));
+        sendBtn.onclick = (e2) => {
+          if (!sure.checked) return;
           busy(e2.currentTarget, async () => {
             const s = await call("send", to, amount, 0);
             rv.classList.add("sent");
@@ -281,9 +285,9 @@
               <div class="actions"><button class="btn" data-act="view">View on the explorer</button></div>`;
             rv.querySelector('[data-act="view"]').onclick = () => call("open_url", EXPLORER_TX(S.settings.explorer, s.txid)).catch((e) => toast(e.message, "error"));
             f.reset(); toast("Sent. It confirms in the next blocks.", "ok");
-          });
+          }, S.card ? "Tap the card… sending" : "Signing and sending…");
         };
-      }).catch(() => {});
+      }, S.card ? "Tap the card… checking" : "Checking and signing…").catch(() => {});
     };
   }
 
@@ -329,7 +333,7 @@
         <pre class="note mono selectable" data-k="card-out" style="white-space:pre-wrap;margin:0"></pre>
         <p class="note">Test reads the card over its encrypted channel without changing it. Reset returns a resettable card to its factory keys, which makes this wallet unopenable: only for test cards holding no XID.</p></div></div>` : ""}
       <div class="set-row"><h3>Seed</h3><form class="stack" data-f="seed" autocomplete="off"><label class="field"><span>Passphrase, to show the seed</span><input type="password" name="pw" autocomplete="current-password"></label>
-        <div><button class="btn small danger" type="submit">Show seed</button></div><div class="seed-reveal"></div></form></div>
+        <div><button class="btn small danger" type="submit" disabled>Show seed</button></div><div class="seed-reveal"></div></form></div>
       <div class="set-row"><h3>About</h3><p class="note">XID Wallet ${esc(S.version)}. Open source, MIT licence. The wallet engine is the xcoin-wallet command-line wallet; signatures are ML-DSA-65 (FIPS 204) with an SLH-DSA-SHA2-128s (FIPS 205) fallback.</p></div>
     </section>`);
     p.querySelectorAll(".seg").forEach((g) => g.querySelectorAll("button").forEach((b) => (b.onclick = async () => {
@@ -356,9 +360,11 @@
       };
     }
     const sf = p.querySelector('[data-f="seed"]');
-    sf.onsubmit = (ev) => { ev.preventDefault();
+    const syncSeed = gate(sf.querySelector("button"), () => sf.pw.value.length > 0);
+    sf.pw.addEventListener("input", syncSeed);
+    sf.onsubmit = (ev) => { ev.preventDefault(); if (!sf.pw.value) return;
       busy(sf.querySelector("button"), async () => {
-        const seed = await call("reveal_seed", sf.pw.value); sf.pw.value = "";
+        const seed = await call("reveal_seed", sf.pw.value); sf.pw.value = ""; syncSeed();
         const box = sf.querySelector(".seed-reveal");
         box.innerHTML = `<div class="seed-grid selectable">${seed.match(/.{8}/g).map((g, i) => `<div><i>${String(i + 1).padStart(2, "0")}</i><b>${g}</b></div>`).join("")}</div><p class="note" style="margin-top:8px">Hidden again in 60 seconds.</p>`;
         setTimeout(() => (box.innerHTML = ""), 60000);

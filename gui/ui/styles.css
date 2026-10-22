@@ -4,20 +4,20 @@
   --lime: #c7ff2e; --on-lime: #0b0b0b;
   --bg: #f2f4ea; --card: #ffffff; --fg: #0b0b0b; --muted: #4b5338; --line: #0b0b0b; --shadow: #0b0b0b;
   --band: #0b0b0b; --on-band: #c7ff2e; --soft: #e3e8d3; --danger: #d6262f; --on-danger: #ffffff; --focus: #0b0b0b;
-  --good: #1c7a2e;
+  --good: #1c7a2e; --off: #d3d6cb; --off-fg: #7a7f6d; --off-line: #a8ad9a;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0b0c08; --card: #14160e; --fg: #eef2e3; --muted: #a6ae8e; --line: #e4ead3; --shadow: #c7ff2e;
     --band: #c7ff2e; --on-band: #0b0b0b; --soft: #1d2014; --danger: #ff5a5f; --on-danger: #0b0b0b; --focus: #c7ff2e;
-    --good: #8fe36b; color-scheme: dark;
+    --good: #8fe36b; --off: #2a2d23; --off-fg: #757b66; --off-line: #4a4f40; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0b0c08; --card: #14160e; --fg: #eef2e3; --muted: #a6ae8e; --line: #e4ead3; --shadow: #c7ff2e;
   --band: #c7ff2e; --on-band: #0b0b0b; --soft: #1d2014; --danger: #ff5a5f; --on-danger: #0b0b0b; --focus: #c7ff2e;
-  --good: #8fe36b; color-scheme: dark;
+  --good: #8fe36b; --off: #2a2d23; --off-fg: #757b66; --off-line: #4a4f40; color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -44,7 +44,8 @@ h1, h2, h3, p { margin: 0; }
 .btn.primary { background: var(--lime); color: var(--on-lime); }
 .btn.danger { background: var(--danger); color: var(--on-danger); }
 .btn.small { padding: 8px 10px; font-size: 11px; box-shadow: 3px 3px 0 var(--shadow); }
-.btn[disabled] { opacity: 0.55; cursor: progress; transform: none; box-shadow: 4px 4px 0 var(--shadow); }
+.btn.busy { opacity: 0.6; cursor: progress; transform: none; box-shadow: 4px 4px 0 var(--shadow); }
+.btn:disabled:not(.busy) { background: var(--off); color: var(--off-fg); border-color: var(--off-line); box-shadow: none; cursor: not-allowed; transform: none; }
 .link { background: none; border: 0; padding: 0; color: var(--fg); font: 600 12px/1.4 "IBM Plex Mono", Consolas, monospace; letter-spacing: 0.06em; text-transform: uppercase; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 
 /* fields */

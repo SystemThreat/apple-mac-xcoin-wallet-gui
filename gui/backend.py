@@ -14,6 +14,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import wallet_cli as w   # noqa: E402
 
+# The app never asks at a terminal: a prompt would wait on a console nobody sees and hold the engine lock, so every
+# later action would hang. Without a passphrase the engine answers "no terminal", which the app shows as "locked".
+w.can_prompt = lambda: False
+
 IDENTITY_INDEX = 99_999_999          # the XID identity: key number 100,000,000 (AYEDEX uses the same key)
 # Funds live at index 0 and up. Every index is its own SHAKE-256 child of the seed, so the identity says nothing
 # about any other key; but an xid1 identity does reveal its own key's single-leaf address, so the app never pays
@@ -135,7 +139,7 @@ class Engine:
         return self._passphrase is not None
 
 
-VERSION = "2.0.0-test3"
+VERSION = "2.0.0-test4"
 _SELFTEST = None
 
 
