@@ -1159,6 +1159,8 @@ class RPC:
         return result.get("result")
 
 KEYTOOL_NAME = "xcoin-wallet.exe" if os.name == "nt" else "xcoin-wallet"
+# On Windows a console program started from a windowed app opens a console window: the keytool is started without one.
+NO_WINDOW = {"creationflags": 0x08000000} if os.name == "nt" else {}   # CREATE_NO_WINDOW
 
 def keytool_path():
     """The native ML-DSA keytool binary (offline signer), alongside this script (or, in the
@@ -1182,7 +1184,7 @@ def sign_offline(seed, raw, prev):
         lines.append(f'{u["txid"]} {u["vout"]} {u["scriptPubKey"]} {sats} {u["keyindex"]}')
     stdin = ("\n".join(lines) + "\n").encode()
     try:
-        proc = subprocess.run([str(tool), "sign"], input=stdin, capture_output=True, timeout=120)
+        proc = subprocess.run([str(tool), "sign"], input=stdin, capture_output=True, timeout=120, **NO_WINDOW)
     except Exception as e:
         raise WalletError(f"offline signer could not run: {e}")
     if proc.returncode != 0:
@@ -1231,7 +1233,7 @@ def derive_offline(seed, index, hrp="xpa"):
         raise WalletError("offline keytool not found: build the native keytool (`NEX=.. ./build.sh`) "
                           "; there is no alternative: the seed never leaves this host")
     try:
-        proc = subprocess.run([str(tool), "_address", "--index", str(int(index)), "--hrp", hrp],
+        proc = subprocess.run([str(tool), "_address", "--index", str(int(index)), "--hrp", hrp], **NO_WINDOW,
                               input=(seed + "\n").encode(), capture_output=True, timeout=60)
     except Exception as e:
         raise WalletError(f"offline keytool could not run: {e}")
@@ -1405,12 +1407,12 @@ def clipboard_copy(text):
     """Copy via the system tool's stdin: the secret never appears in argv, env, or ps."""
     copy, _ = _clip_tools()
     if not copy or not shutil.which(copy[0]): raise WalletError("no clipboard tool found (Linux: install wl-clipboard or xclip)")
-    subprocess.run(copy, input=text.encode(), check=True)
+    subprocess.run(copy, input=text.encode(), check=True, **NO_WINDOW)
 
 def clipboard_paste():
     _, paste = _clip_tools()
     if not paste or not shutil.which(paste[0]): raise WalletError("no clipboard tool found (Linux: install wl-clipboard or xclip)")
-    return subprocess.run(paste, capture_output=True, check=True).stdout.decode()
+    return subprocess.run(paste, capture_output=True, check=True, **NO_WINDOW).stdout.decode()
 
 def clipboard_clear():
     clipboard_copy("")
@@ -1821,7 +1823,7 @@ def cmd_signmessage(args):
     # message travels to the keytool as one hex line, never as raw text.
     msg_hex = message.encode("utf-8").hex()
     try:
-        proc = subprocess.run([str(tool), "_signmsg", "--index", str(index), "--hrp", hrp],
+        proc = subprocess.run([str(tool), "_signmsg", "--index", str(index), "--hrp", hrp], **NO_WINDOW,
                               input=(seed + "\n" + msg_hex + "\n").encode(), capture_output=True, timeout=120)
     except Exception as e:
         raise WalletError(f"offline keytool could not run: {e}")

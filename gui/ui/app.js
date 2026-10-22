@@ -38,11 +38,19 @@
     api = window.pywebview.api;
     S = await call("state");
     applyTheme(S.settings.theme);
+    if (S.selftest !== "ok") return broken(S.selftest);
     if (!S.exists) return welcome();
     if (!S.unlocked) return unlock();
     return shell();
   }
   window.addEventListener("pywebviewready", () => boot().catch((e) => toast(e.message, "error")));
+
+  function broken(why) {
+    h(`<div class="welcome"><section class="welcome-art"><span class="label">Stopped</span><div><h1 class="display">Do not<br>use this build</h1>
+      <p style="margin-top:18px">The signing tool did not pass its self-test, so this copy of the wallet must not sign anything.</p></div><span></span></section>
+      <section class="welcome-side"><h2 class="display">What happened</h2><p class="mono selectable" style="word-break:break-word">${esc(why)}</p>
+      <p class="note">Get a fresh copy of XID Wallet and check its SHA-256 against the published one. Your wallet file and seed are untouched.</p></section></div>`);
+  }
 
   // ── welcome: no wallet yet ──
   function welcome() {
@@ -57,10 +65,11 @@
         <button class="choice box lime" data-go="create"><b>Create a new wallet</b><span>A fresh seed, encrypted with your passphrase.</span></button>
         <button class="choice box" data-go="restore"><b>Restore from a seed</b><span>You have the 64-character seed written down.</span></button>
         <button class="choice box" data-go="open"><b>Open a wallet file</b><span>A .mmm file from the command-line wallet or a backup.</span></button>
-        <button class="choice box" disabled><b>Card wallet</b><span>NTAG 424 DNA cards: coming in a later version of this app.</span></button>
+        <button class="choice box" data-go="card"${S.card_software ? "" : " disabled"}><b>Card wallet</b><span>${S.card_software ? "An NTAG 424 DNA card is the key: tap it to unlock and to sign. Needs a USB card reader." : "Card software is not in this copy of the app."}</span></button>
       </section></div>`);
     $app.querySelector('[data-go="create"]').onclick = createWallet;
     $app.querySelector('[data-go="restore"]').onclick = restoreWallet;
+    const cardBtn = $app.querySelector('[data-go="card"]'); if (cardBtn && !cardBtn.disabled) cardBtn.onclick = cardWallet;
     $app.querySelector('[data-go="open"]').onclick = async () => { try { if (await call("choose_wallet_file")) { S = await call("state"); unlock(); } } catch (e) { toast(e.message, "error"); } };
   }
 
@@ -120,14 +129,39 @@
       busy(f.querySelector("button"), async () => { await call("restore", f.seed.value, f.pw.value); f.reset(); S = await call("state"); toast("Wallet restored.", "ok"); shell(); }); };
   }
 
+  function cardWallet() {
+    h(`<div class="welcome"><section class="welcome-art"><span class="label">Card wallet</span><div><h1 class="display">The card<br>is the key</h1>
+      <p style="margin-top:18px">A random secret is written into the NTAG 424 DNA chip over an encrypted channel. Your wallet opens only with this file, the card and the passphrase together. The seed is never shown.</p></div>
+      <div class="facts"><span>NXP NTAG 424 DNA</span><span>AES EV2</span><span>One file</span></div></section>
+      <section class="welcome-side"><button class="link back">← Back</button><h2 class="display">Set up the card</h2>
+      <form class="stack" autocomplete="off">
+        <label class="field"><span>Card label</span><input name="label" value="primary" maxlength="32"></label>
+        ${passFields()}
+        <label class="check"><input type="checkbox" name="seal"> Seal the card permanently. A sealed card can never be reset or reused. Leave this off while testing.</label>
+        <p class="warn">Plug in the card reader and place a blank card on it. Keep it there until the wallet is made.</p>
+        <button class="btn primary" type="submit">Write the card →</button></form></section></div>`);
+    $app.querySelector(".back").onclick = welcome;
+    const f = $app.querySelector("form");
+    f.onsubmit = (ev) => { ev.preventDefault(); if (!checkPass(f)) return;
+      if (f.seal.checked && !confirm("Seal this card permanently? It can never be reset or reused.")) return;
+      toast("Hold the card on the reader…");
+      busy(f.querySelector("button"), async () => {
+        const r = await call("card_create", f.pw.value, f.label.value.trim() || "primary", f.seal.checked);
+        f.reset(); S = await call("state");
+        toast(`Card ${r.card_uid} is ready${r.permanent ? " and sealed" : ""}. Tap it again to open the wallet.`, "ok");
+        unlock();
+      }); };
+  }
+
   function unlock() {
     h(`<div class="welcome"><section class="welcome-art"><span class="label">Locked</span><div><h1 class="display">XID<br>Wallet</h1>
       <p style="margin-top:18px">Unlock to see your balance and send. The wallet locks itself after ten minutes without use.</p></div>
       <div class="facts"><span>${esc(S.settings.hrp === "xpa" ? "Mainnet" : "Testnet")}</span><span>${esc(S.settings.explorer.replace(/^https?:\/\//, ""))}</span></div></section>
       <section class="welcome-side"><h2 class="display">Unlock</h2>
       <form class="stack" autocomplete="off"><p class="note selectable mono" style="word-break:break-all">${esc(S.file)}</p>
-      <label class="field"><span>Passphrase</span><input type="password" name="pw" autocomplete="current-password" required></label>
-      <button class="btn primary" type="submit">Unlock →</button></form>
+      ${S.card ? '<p class="warn">Card wallet: place your card on the reader, then unlock.</p>' : ""}
+      <label class="field"><span>Passphrase</span><input type="password" name="pw" autocomplete="current-password" ${S.card ? "" : "required"}></label>
+      <button class="btn primary" type="submit">${S.card ? "Unlock with card →" : "Unlock →"}</button></form>
       <div class="row"><button class="link" data-act="other">Open another wallet file</button><button class="link" data-act="new">New or restored wallet</button></div></section></div>`);
     const f = $app.querySelector("form");
     f.onsubmit = (ev) => { ev.preventDefault(); busy(f.querySelector("button"), async () => { await call("unlock", f.pw.value); f.reset(); S = await call("state"); shell(); }); };
@@ -221,7 +255,7 @@
         <label class="field"><span>To (XID address)</span><input name="to" spellcheck="false" placeholder="${S.settings.hrp}1r…" required></label>
         <label class="field"><span>Amount</span><div class="amount-wrap"><input name="amount" inputmode="decimal" placeholder="0.00000000" required><b>XID</b></div></label>
         <button class="btn primary" type="submit">Review →</button>
-        <p class="note">Review signs the transaction on this computer and checks it with the network. Nothing is sent until you press Send.</p>
+        <p class="note">Review signs the transaction on this computer and checks it with the network. Nothing is sent until you press Send.${S.card ? " Card wallet: keep your card on the reader for Review and for Send." : ""}</p>
       </form><section class="box review" id="review" hidden></section></div>`);
     const f = p.querySelector("form"), rv = p.querySelector("#review");
     f.onsubmit = (ev) => { ev.preventDefault();
@@ -291,6 +325,9 @@
         <div><button class="btn small" type="submit">Save</button></div><p class="note">The explorer only reports the chain and passes on signed transactions. It never sees your keys.</p></form></div>
       <div class="set-row"><h3>Wallet file</h3><div class="stack"><p class="addr selectable">${esc(S.file)}</p><div class="row"><button class="btn small" data-act="backup">Back up the file</button><button class="btn small" data-act="other">Open another</button></div>
         <p class="note">The file is encrypted with your passphrase. Keep a copy on a USB stick; your written seed is the backup that needs no passphrase.</p></div></div>
+      ${S.card ? `<div class="set-row"><h3>Card</h3><div class="stack"><div class="row"><button class="btn small" data-act="card-test">Test the card</button><button class="btn small" data-act="card-status">Cards for this wallet</button><button class="btn small danger" data-act="card-reset">Reset the card</button></div>
+        <pre class="note mono selectable" data-k="card-out" style="white-space:pre-wrap;margin:0"></pre>
+        <p class="note">Test reads the card over its encrypted channel without changing it. Reset returns a resettable card to its factory keys, which makes this wallet unopenable: only for test cards holding no XID.</p></div></div>` : ""}
       <div class="set-row"><h3>Seed</h3><form class="stack" data-f="seed" autocomplete="off"><label class="field"><span>Passphrase, to show the seed</span><input type="password" name="pw" autocomplete="current-password"></label>
         <div><button class="btn small danger" type="submit">Show seed</button></div><div class="seed-reveal"></div></form></div>
       <div class="set-row"><h3>About</h3><p class="note">XID Wallet ${esc(S.version)}. Open source, MIT licence. The wallet engine is the xcoin-wallet command-line wallet; signatures are ML-DSA-65 (FIPS 204) with an SLH-DSA-SHA2-128s (FIPS 205) fallback.</p></div>
@@ -307,6 +344,17 @@
       try { S.settings = await call("set_setting", "explorer", ev.target.url.value.trim()); toast("Explorer saved.", "ok"); } catch (e) { toast(e.message, "error"); } };
     p.querySelector('[data-act="backup"]').onclick = async () => { try { const r = await call("backup"); if (r) toast(`Backed up to ${r.backup}`, "ok"); } catch (e) { toast(e.message, "error"); } };
     p.querySelector('[data-act="other"]').onclick = async () => { try { if (await call("choose_wallet_file")) { S = await call("state"); unlock(); } } catch (e) { toast(e.message, "error"); } };
+    if (S.card) {
+      const out = p.querySelector('[data-k="card-out"]');
+      const show = (v) => (out.textContent = JSON.stringify(v, null, 2));
+      p.querySelector('[data-act="card-test"]').onclick = (ev) => { toast("Hold the card on the reader…"); busy(ev.currentTarget, async () => { show(await call("card_test")); toast("The card answered correctly.", "ok"); }); };
+      p.querySelector('[data-act="card-status"]').onclick = (ev) => busy(ev.currentTarget, async () => show(await call("card_status")));
+      p.querySelector('[data-act="card-reset"]').onclick = (ev) => {
+        if (prompt("Resetting makes this wallet unopenable. Type RESET to return the card to factory keys.") !== "RESET") return;
+        toast("Hold the card on the reader…");
+        busy(ev.currentTarget, async () => { show(await call("card_reset")); S = await call("state"); toast("Card reset. This wallet can no longer be opened.", "ok"); });
+      };
+    }
     const sf = p.querySelector('[data-f="seed"]');
     sf.onsubmit = (ev) => { ev.preventDefault();
       busy(sf.querySelector("button"), async () => {
