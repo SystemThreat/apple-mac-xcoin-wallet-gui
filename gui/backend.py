@@ -207,7 +207,7 @@ class Engine:
         return self._passphrase is not None
 
 
-VERSION = "2.0.0-test10"
+VERSION = "2.0.0-test11"
 _SELFTEST = None
 
 
@@ -270,10 +270,14 @@ class Api:
     def state(self):
         def go():
             fmt, card = w._wallet_format(self._e.file)
+            seed_reveal = None   # may this card wallet ever show its seed? Known only once it is unlocked (the mark is passphrase-sealed)
+            if fmt == "mmm5-card" and (pw := self._e._session_passphrase()) is not None:
+                try: seed_reveal = w.seed_reveal_allowed(self._e.file, pw)
+                except w.WalletError: pass
             return {"file": self._e.file, "exists": Path(self._e.file).exists(), "format": fmt, "card": card,
                     "unlocked": self._e.unlocked, "settings": self._e.settings, "identity_index": IDENTITY_INDEX,
                     "version": VERSION, "platform": sys.platform, "card_software": w.card_modules_missing() is None,
-                    "selftest": keytool_selftest()}
+                    "selftest": keytool_selftest(), "seed_reveal": seed_reveal}
         return self._wrap(go)
 
     def set_setting(self, key, value):
@@ -433,9 +437,10 @@ class Api:
         return self._wrap(go)
 
     # ── NTAG 424 DNA card wallets ──
-    def card_create(self, passphrase, label="primary", permanent=False, path=None):
+    def card_create(self, passphrase, label="primary", permanent=False, path=None, allow_seed=False):
         """A one-file card wallet: the card's keys live in the .mmm under the passphrase. Resettable unless
-        `permanent` (a sealed card can never be reset or reused). Needs the card on the reader."""
+        `permanent` (a sealed card can never be reset or reused). `allow_seed`: the seed may be shown later
+        (card + passphrase); False locks it for good. That choice is final. Needs the card on the reader."""
         def go():
             if len(passphrase) < 8: raise w.WalletError("use a passphrase of at least 8 characters")
             before = self._e.settings["file"]
@@ -445,6 +450,7 @@ class Api:
                 self._e.settings["file"] = str(next(d / f"card-wallet-{i}.mmm" for i in range(1, 1000) if not (d / f"card-wallet-{i}.mmm").exists()))
             argv = ["new", "--card", "--one-file", "--offline", "--label", (label or "primary")[:32]]
             if not permanent: argv.append("--resettable")
+            if allow_seed: argv.append("--allow-seed-reveal")
             try:
                 made = self._e.run(*argv, passphrase=passphrase, use_backend=False)
             except Exception:
@@ -459,6 +465,55 @@ class Api:
 
     def card_status(self):
         return self._wrap(lambda: self._e.run("card-status", use_backend=False))
+
+    def card_cancel(self):
+        """The Cancel button: ends a wait for a card. Once the first write to the new card has begun it is too late
+        (a half-written card is worse than none), so the backup then finishes."""
+        def go():
+            w._card_module().CANCELLED = True
+            return True
+        return self._wrap(go)
+
+    def card_backup(self, label="backup", permanent=False):
+        """Copy this wallet's secret onto another blank card. ANY card already registered in the wallet file can be
+        the source (the first card, a backup, a backup of a backup): the new card is registered in the same file, so
+        it can in turn make the next one. The wallet must be unlocked (its passphrase guards the card keys).
+        The window is told each step, with the seconds the reader waits for it, as window.cardStep({...})."""
+        def go():
+            cs = w._card_module()
+            cs.CANCELLED = False
+            waits = [0]
+
+            def push(step, text, seconds=0, writing=False):
+                if not self._window: return
+                msg = json.dumps({"step": step, "text": text, "seconds": seconds, "writing": writing})
+                try: self._window.evaluate_js(f"window.cardStep && window.cardStep({msg})")
+                except Exception: pass
+
+            def on_event(name, *parts):
+                if name == "card-wait":       # the reader starts waiting: first for the old card, then for the new one
+                    waits[0] += 1
+                    seconds = int(parts[0]) if parts else cs.card_timeout()
+                    if waits[0] == 1: push(1, "Put a card that already opens this wallet on the reader and keep it there.", seconds)
+                    else: push(3, "Put a NEW blank card on the reader and keep it there until this finishes.", seconds)
+                elif name == "card-swap":
+                    push(2, "Card read. Take it off the reader now.", cs.card_timeout())
+
+            begin = w.provisioning_begin
+            def begin_checked():              # the commit point: a Cancel that came in before it still stops the run
+                if cs.CANCELLED: raise w.WalletError("cancelled")
+                push(3, "Writing the new card. Do not move it.", 0, True)
+                begin()
+
+            argv = ["card-backup", "--auto-swap", "--label", (label or "backup")[:32]]
+            if not permanent: argv.append("--resettable")
+            saved = w.event, w.provisioning_begin
+            w.event, w.provisioning_begin = on_event, begin_checked
+            try: return self._e.run(*argv, use_backend=False)
+            finally:
+                w.event, w.provisioning_begin = saved
+                cs.CANCELLED = False
+        return self._wrap(go)
 
     def card_reset(self):
         def go():

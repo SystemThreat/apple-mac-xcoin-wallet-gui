@@ -137,18 +137,29 @@
       <div class="facts"><span>NXP NTAG 424 DNA</span><span>AES EV2</span><span>One file</span></div></section>
       <section class="welcome-side"><button class="link back">← Back</button><h2 class="display">Set up the card</h2>
       <form class="stack" autocomplete="off">
+        <div class="choice"><p class="warn"><b>Choose carefully. This choice is final.</b> It is made once, now, and nothing in this app or the command line can change it later.</p>
+          <label class="opt"><input type="radio" name="seedmode" value="never" required><b>Never show the seed (maximum security)</b>
+            <span class="d">The seed is not shown now and never will be. Not to you, not to anyone who gets your wallet file, your card and your passphrase. There is no seed to write down, and nobody can trick you into reading it out. The wallet lives only in the file, a card and the passphrase. Lose all your cards, or the file, or the passphrase, and the funds are gone for good, so make backup cards right away and keep copies of the file.</span></label>
+          <label class="opt"><input type="radio" name="seedmode" value="allow" required><b>Allow showing the seed later</b>
+            <span class="d">In Settings you can show the seed, with the file, a card and the passphrase. You can write it down and restore the wallet without any card. The cost: anyone who gets all three can show it too, and a written copy can be stolen or leaked.</span></label>
+          <p class="note">How strong is "never"? It is a lock built into the file and this app, not a law of mathematics: the app still opens the seed in memory to sign payments. It means no screen, button or command will ever show it.</p>
+        </div>
         <label class="field"><span>Card label</span><input name="label" value="primary" maxlength="32"></label>
         ${passFields()}
         <label class="check"><input type="checkbox" name="seal"> Seal the card permanently. A sealed card can never be reset or reused. Leave this off while testing.</label>
-        <p class="warn">Plug in the card reader and place a blank card on it. Keep it there until the wallet is made.</p>
+        <p class="warn"><b>1.</b> Plug in the card reader and put a blank card on it.<br><b>2.</b> Fill in the passphrase above.<br><b>3.</b> Press Write the card. Do not press it until the card is on the reader, and keep it there until the wallet is made.</p>
         <button class="btn primary" type="submit">Write the card →</button></form></section></div>`);
     $app.querySelector(".back").onclick = welcome;
     const f = $app.querySelector("form");
     f.onsubmit = (ev) => { ev.preventDefault(); if (!checkPass(f)) return;
+      const allow = f.seedmode.value === "allow";
+      if (!confirm(allow
+        ? "FINAL CHOICE: you can show the seed later.\n\nAnyone who gets the wallet file, a card and your passphrase will be able to show it too. This can never be changed.\n\nContinue?"
+        : "FINAL CHOICE: the seed will NEVER be shown.\n\nIf you lose every card, or the wallet file, or the passphrase, the funds are lost for good: there is no seed to restore from. This can never be changed.\n\nContinue?")) return;
       if (f.seal.checked && !confirm("Seal this card permanently? It can never be reset or reused.")) return;
       toast("Hold the card on the reader…");
       busy(f.querySelector("button"), async () => {
-        const r = await call("card_create", f.pw.value, f.label.value.trim() || "primary", f.seal.checked);
+        const r = await call("card_create", f.pw.value, f.label.value.trim() || "primary", f.seal.checked, null, allow);
         f.reset(); S = await call("state");
         toast(`Card ${r.card_uid} is ready${r.permanent ? " and sealed" : ""}. Tap it again to open the wallet.`, "ok");
         unlock();
@@ -162,12 +173,12 @@
       <div class="facts"><span>${esc(S.settings.hrp === "xpa" ? "Mainnet" : "Testnet")}</span><span>${esc(S.settings.explorer.replace(/^https?:\/\//, ""))}</span></div></section>
       <section class="welcome-side"><h2 class="display">Unlock</h2>
       <form class="stack" autocomplete="off"><p class="note selectable mono" style="word-break:break-all">${esc(S.file)}</p>
-      ${S.card ? '<p class="warn">Card wallet: place your card on the reader, then unlock.</p>' : ""}
+      ${S.card ? '<p class="warn"><b>1.</b> Put your card on the reader and leave it there.<br><b>2.</b> Type your passphrase.<br><b>3.</b> Press Unlock. Do not press it until the card is on the reader.</p>' : ""}
       <label class="field"><span>Passphrase</span><input type="password" name="pw" autocomplete="current-password" ${S.card ? "" : "required"}></label>
       <button class="btn primary" type="submit">${S.card ? "Unlock with card →" : "Unlock →"}</button></form>
       <div class="row"><button class="link" data-act="other">Open another wallet file</button><button class="link" data-act="new">New or restored wallet</button></div></section></div>`);
     const f = $app.querySelector("form");
-    f.onsubmit = (ev) => { ev.preventDefault(); busy(f.querySelector("button"), async () => { await call("unlock", f.pw.value); f.reset(); S = await call("state"); shell(); }); };
+    f.onsubmit = (ev) => { ev.preventDefault(); if (S.card) toast("Keep the card on the reader until the wallet opens…"); busy(f.querySelector("button"), async () => { await call("unlock", f.pw.value); f.reset(); S = await call("state"); shell(); }); };
     $app.querySelector('[data-act="other"]').onclick = async () => { try { if (await call("choose_wallet_file")) { S = await call("state"); unlock(); } } catch (e) { toast(e.message, "error"); } };
     $app.querySelector('[data-act="new"]').onclick = async () => {
       const p = await call("set_setting", "file", S.file.replace(/[^\\/]+$/, `wallet-${Date.now().toString(36)}.mmm`)); S = await call("state"); welcome(); };
@@ -357,10 +368,21 @@
       <div class="set-row"><h3>Wallet file</h3><div class="stack"><p class="addr selectable">${esc(S.file)}</p><div class="row"><button class="btn small" data-act="backup">Back up the file</button><button class="btn small" data-act="other">Open another</button></div>
         <p class="note">The file is encrypted with your passphrase. Keep a copy on a USB stick; your written seed is the backup that needs no passphrase.</p></div></div>
       ${S.card ? `<div class="set-row"><h3>Card</h3><div class="stack"><div class="row"><button class="btn small" data-act="card-test">Test the card</button><button class="btn small" data-act="card-status">Cards for this wallet</button><button class="btn small danger" data-act="card-reset">Reset the card</button></div>
+        <p class="note"><b>Put the card on the reader before you press Test or Reset.</b> The reader waits 60 seconds for a card.</p>
+        <section class="bk" data-k="bk"><h4>Backup card</h4>
+          <p class="note">Copies this wallet onto another blank card. Any card that already opens this wallet can be the source, including another backup, so the second card can make a third if the first is lost.</p>
+          <div class="bk-idle"><label class="check"><input type="checkbox" data-k="bk-seal"><span>Seal the backup card permanently</span></label><button class="btn small" data-act="card-backup">Make a backup card</button></div>
+          <div class="flow" data-k="flow" hidden>
+            <span class="flow-step" data-k="flow-step"></span><span class="flow-clock" data-k="flow-clock"></span>
+            <span class="flow-msg" data-k="flow-msg"></span><button class="btn small" data-act="card-cancel">Cancel</button>
+            <span class="flow-bar"><i data-k="flow-bar"></i></span></div>
+          <p class="note">Each new card is added to the wallet file: copy the file again afterwards, and keep the cards in separate places.</p></section>
         <pre class="note mono selectable" data-k="card-out" style="white-space:pre-wrap;margin:0"></pre>
         <p class="note">Test reads the card over its encrypted channel without changing it. Reset returns a resettable card to its factory keys, which makes this wallet unopenable: only for test cards holding no XID.</p></div></div>` : ""}
-      <div class="set-row"><h3>Seed</h3><form class="stack" data-f="seed" autocomplete="off"><label class="field"><span>Passphrase, to show the seed</span><input type="password" name="pw" autocomplete="current-password"></label>
-        <div><button class="btn small danger" type="submit" disabled>Show seed</button></div><div class="seed-reveal"></div></form></div>
+      ${S.card && S.seed_reveal === false ? `<div class="set-row"><h3>Seed</h3><div class="stack"><p class="warn"><b>Locked for good.</b> This wallet was created with the choice never to show the seed. That choice is final: nothing can show it, and there is no seed to write down.</p>
+        <p class="note">Your wallet is the file, a card and the passphrase. Make backup cards (Card section above) and keep copies of the wallet file in separate places.</p></div></div>` :
+      `<div class="set-row"><h3>Seed</h3><form class="stack" data-f="seed" autocomplete="off">${S.card ? '<p class="warn">Put your card on the reader first, then type the passphrase and press Show seed.</p>' : ""}<label class="field"><span>Passphrase, to show the seed</span><input type="password" name="pw" autocomplete="current-password"></label>
+        <div><button class="btn small danger" type="submit" disabled>Show seed</button></div><div class="seed-reveal"></div></form></div>`}
       ${S.platform === "win32" ? `<div class="set-row"><h3>Shortcuts</h3><div class="stack"><div><button class="btn small" data-act="shortcuts">Add to desktop and Start menu</button></div>
         <p class="note">Puts an XID Wallet icon on the desktop and in the Start menu. If you move the XID Wallet folder, press it again.</p></div></div>` : ""}
       <div class="set-row"><h3>About</h3><p class="note">XID Wallet ${esc(S.version)}. Open source, MIT licence. The wallet engine is the xcoin-wallet command-line wallet; signatures are ML-DSA-65 (FIPS 204) with an SLH-DSA-SHA2-128s (FIPS 205) fallback.</p></div>
@@ -384,13 +406,59 @@
       const show = (v) => (out.textContent = JSON.stringify(v, null, 2));
       p.querySelector('[data-act="card-test"]').onclick = (ev) => { toast("Hold the card on the reader…"); busy(ev.currentTarget, async () => { show(await call("card_test")); toast("The card answered correctly.", "ok"); }); };
       p.querySelector('[data-act="card-status"]').onclick = (ev) => busy(ev.currentTarget, async () => show(await call("card_status")));
+      const q = (k) => p.querySelector(`[data-k="${k}"]`);
+      const sealBox = q("bk-seal"), flow = q("flow"), cancelBtn = p.querySelector('[data-act="card-cancel"]');
+      const others = p.querySelectorAll('[data-act="card-test"], [data-act="card-status"], [data-act="card-reset"]');
+      let clock = null, cancelled = false;
+      // while a backup runs: the seal box and the other card buttons are gray, the step panel with Cancel is shown
+      const running = (on) => {
+        sealBox.disabled = on; sealBox.closest(".check").classList.toggle("off", on);
+        others.forEach((b) => (b.disabled = on)); flow.hidden = !on;
+      };
+      const count = (secs) => {
+        clearInterval(clock);
+        const end = Date.now() + secs * 1000;
+        const draw = () => {
+          const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+          q("flow-clock").textContent = `${left}s`; q("flow-bar").style.width = `${(left / secs) * 100}%`;
+          if (!left) clearInterval(clock);
+        };
+        draw(); clock = setInterval(draw, 250);
+      };
+      // the engine's steps arrive here: {step, text, seconds, writing}
+      const stepTo = (s) => {
+        q("flow-step").textContent = `Step ${s.step} of 3`; q("flow-msg").textContent = s.text;
+        if (s.seconds) count(s.seconds); else { clearInterval(clock); q("flow-clock").textContent = ""; q("flow-bar").style.width = "100%"; }
+        cancelBtn.disabled = !!s.writing || cancelled;
+      };
+      cancelBtn.onclick = async () => {
+        cancelled = true; cancelBtn.disabled = true; q("flow-msg").textContent = "Cancelling…";
+        try { await call("card_cancel"); } catch (e) { toast(e.message, "error"); }
+      };
+      p.querySelector('[data-act="card-backup"]').onclick = (ev) => {
+        const seal = sealBox.checked;
+        if (seal && !confirm("Seal the backup card permanently? It can never be reset or reused.")) return;
+        cancelled = false; running(true); window.cardStep = stepTo;
+        stepTo({ step: 1, text: "Starting the reader…", seconds: 0 });
+        busy(ev.currentTarget, async () => {
+          try {
+            const r = await call("card_backup", "backup", seal);
+            show(r);
+            toast(`Backup card ${r.card_uid} is ready${r.cards ? `. ${r.cards} cards now open this wallet` : ""}. Copy the wallet file again.`, "ok");
+          } catch (e) {
+            if (!cancelled) throw e;
+            toast("Cancelled. Nothing was written to a new card.", "ok");
+          } finally { clearInterval(clock); window.cardStep = null; running(false); }
+        });
+      };
       p.querySelector('[data-act="card-reset"]').onclick = (ev) => {
         if (prompt("Resetting makes this wallet unopenable. Type RESET to return the card to factory keys.") !== "RESET") return;
         toast("Hold the card on the reader…");
         busy(ev.currentTarget, async () => { show(await call("card_reset")); S = await call("state"); toast("Card reset. This wallet can no longer be opened.", "ok"); });
       };
     }
-    const sf = p.querySelector('[data-f="seed"]');
+    const sf = p.querySelector('[data-f="seed"]');   // absent when this card wallet's seed is locked for good
+    if (sf) {
     const syncSeed = gate(sf.querySelector("button"), () => sf.pw.value.length > 0);
     sf.pw.addEventListener("input", syncSeed);
     sf.onsubmit = (ev) => { ev.preventDefault(); if (!sf.pw.value) return;
@@ -401,5 +469,6 @@
         setTimeout(() => (box.innerHTML = ""), 60000);
       });
     };
+    }
   }
 })();

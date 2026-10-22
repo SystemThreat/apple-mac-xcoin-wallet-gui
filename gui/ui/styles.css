@@ -97,6 +97,33 @@ h1, h2, h3, p { margin: 0; }
 .warn { border: 3px solid var(--line); background: var(--lime); color: var(--on-lime); padding: 14px 16px; font-weight: 500; }
 .check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; }
 .check input { width: 20px; height: 20px; accent-color: var(--fg); margin: 1px 0 0; }
+.check.off { color: var(--off-fg); }
+.check input:disabled { accent-color: var(--off-fg); cursor: not-allowed; }
+
+/* backup card: one panel, so the seal box, the button and the countdown line up */
+.bk { display: grid; gap: 14px; padding: 16px 18px; border: 3px solid var(--line); background: var(--card); }
+.bk h4 { margin: 0; font: 900 20px/1 "Big Shoulders Display", "Arial Narrow", Impact, sans-serif; text-transform: uppercase; letter-spacing: 0.02em; }
+.bk-idle { display: flex; align-items: center; justify-content: space-between; gap: 14px 20px; flex-wrap: wrap; }
+.bk-idle .check { align-items: center; }
+.flow { display: grid; gap: 6px 18px; align-items: center; padding: 14px 16px; border: 3px solid var(--line); background: var(--lime); color: var(--on-lime);
+  grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "step clock" "msg clock" "bar bar" "cancel cancel"; }
+.flow[hidden] { display: none; }
+.flow-step { grid-area: step; font: 700 11px/1 "IBM Plex Mono", Consolas, monospace; letter-spacing: 0.14em; text-transform: uppercase; }
+.flow-msg { grid-area: msg; font-weight: 600; }
+.flow-clock { grid-area: clock; min-width: 3.2ch; text-align: right; font: 900 44px/1 "Big Shoulders Display", "Arial Narrow", Impact, sans-serif; }
+.flow-bar { grid-area: bar; display: block; height: 8px; margin-top: 4px; background: rgba(11, 11, 11, 0.2); }
+.flow-bar i { display: block; width: 100%; height: 100%; background: var(--on-lime); transition: width 0.25s linear; }
+.flow .btn { grid-area: cancel; justify-self: start; margin-top: 6px; }
+
+/* the seed choice at card setup: two big options, the picked one turns lime */
+.choice { display: grid; gap: 12px; }
+.opt { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 6px 12px; padding: 14px 16px; border: 3px solid var(--line); background: var(--card); cursor: pointer; }
+.opt input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--fg); }
+.opt b { font: 900 19px/1.1 "Big Shoulders Display", "Arial Narrow", Impact, sans-serif; text-transform: uppercase; letter-spacing: 0.02em; }
+.opt .d { grid-column: 2; font-size: 13.5px; line-height: 1.45; color: var(--muted); }
+.opt:has(input:checked) { background: var(--lime); color: var(--on-lime); }
+.opt:has(input:checked) .d { color: var(--on-lime); }
+.opt:has(input:checked) input { accent-color: var(--on-lime); }
 
 /* the wallet shell */
 .shell { height: 100%; display: grid; grid-template-columns: 248px minmax(0, 1fr); }
