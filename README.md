@@ -2,6 +2,40 @@
 
 A minimal, auditable **post-quantum** command-line wallet for xCoin (XID).
 
+## Windows app: XID Wallet
+
+1. Download **`XID-Wallet-Windows-portable-2.0.0-test9.zip`** from this repository's
+   **Releases** page (not the green **Code** button: that zip is the source code, without
+   the app's runtime, so it cannot run).
+2. Check the download (below).
+3. Right-click the zip, **Extract All**, then open the extracted **XID Wallet** folder and
+   double-click **`XID Wallet.exe`** (the xCoin logo). Nothing is installed.
+4. The first time, Windows may say "Windows protected your PC" (the build is not code-signed
+   yet): **More info**, then **Run anyway**.
+
+In the app, **Settings, Shortcuts** puts an XID Wallet icon on the desktop and in the Start
+menu. Wallet files stay in `C:\Users\<you>\.xcoin\`, not in the app folder.
+
+### File integrity (SHA-256)
+
+| File | Size (bytes) | SHA-256 |
+|---|---|---|
+| `XID-Wallet-Windows-portable-2.0.0-test9.zip` | 17,250,505 | `1b77c1ef62797007cb0822373af0fa45964e6fddaafa4fddf5816174bb286638` |
+
+Check it before you open anything. In PowerShell, in the folder with the zip:
+
+```powershell
+(Get-FileHash .\XID-Wallet-Windows-portable-2.0.0-test9.zip -Algorithm SHA256).Hash -eq '1B77C1EF62797007CB0822373AF0FA45964E6FDDAAFA4FDDF5816174BB286638'
+```
+
+`True` means the file is exactly the one published here. `False` means it is not: delete it
+and download it again from the Releases page. On macOS or Linux:
+`shasum -a 256 XID-Wallet-Windows-portable-2.0.0-test9.zip`.
+
+The same hash is in the `.sha256` file attached to the release. A copy shared any other way
+(Google Drive, a USB stick) must match this hash too. The zip is built by
+`gui/build-portable.sh` (see [gui/README.md](gui/README.md)).
+
 ## Quick start: check a balance and send
 
 `xcoin-wallet` is the installed command (`./build.sh && ./install.sh`, see
@@ -36,7 +70,8 @@ xcoin-wallet --rpc-cookie /path/to/datadir/.cookie balance
 
 - With no `--config` the conf is `~/.xcoin/nex.conf`: the wallet looks in `~/.xcoin`, then
   in the node's default data directory (`~/Library/Application Support/NEX` on macOS,
-  `~/.nex` on Linux).
+  `~/.nex` on Linux, `%LOCALAPPDATA%\NEX` on Windows, or `%APPDATA%\NEX` where an older
+  node made it).
 - With no `rpcport=` and no `--rpc-port`, the port is the node's default for the conf's
   chain: 8332 mainnet, 19432 testnet A (`testnet=1`), 18443 regtest. A conf that names no
   chain takes the cookie's subdirectory from the port: `--rpc-port 19432` reads `testneta/.cookie`.

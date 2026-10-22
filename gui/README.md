@@ -34,7 +34,25 @@ On Windows, use `gui\.venv\Scripts\python gui\app.py`.
 
 Settings are kept in `~/.xcoin/gui-settings.json` and are not secret: the theme, the network, the explorer, and which wallet file is open. Wallet files are the CLI's `.mmm` files, so the app and the CLI open the same wallet.
 
-## Build the Windows app
+## Build the portable Windows app (on a Mac)
+
+This is how the released zip is made:
+
+```bash
+gui/build-portable.sh          # needs zig and python3; downloads from python.org (Sigstore-verified) and PyPI
+```
+
+It produces `dist/XID Wallet/` and `dist/XID-Wallet-Windows-portable-<version>.zip`, with its SHA-256 in a `.sha256` file beside it. Put that hash in the repository README's file integrity table with every release.
+
+| In the folder | What it is |
+|---|---|
+| `XID Wallet.exe` | What people double-click. `launcher/xid-wallet.c`, cross-compiled with zig, with the xCoin icon, version information and the same manifest as Python's `pythonw.exe`. It runs `app\gui\app.py` inside its own process with the bundled Python, so Windows shows one app named XID Wallet. |
+| `runtime\` | The official embeddable Python 3.12 and the app's Windows libraries. |
+| `app\` | The wallet engine, the keytool (`xcoin-wallet.exe`, cross-compiled with zig), the app, and `XID Wallet (debug).cmd`, which shows startup errors in a console. |
+
+The icon is drawn by `assets/make_icon.py` from the official xCoin mark (the black XID glyph in the acid lime circle on xcoinproject.com). In the app, Settings, Shortcuts runs `shortcuts.ps1` to put it on the desktop and in the Start menu.
+
+## Build the Windows app with PyInstaller (on Windows)
 
 On Windows with Python 3.12, CMake and Visual Studio's C++ tools, run:
 
