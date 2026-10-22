@@ -59,9 +59,12 @@ class TestBackup(unittest.TestCase):
         self.api._window = type("Window", (), {"create_file_dialog": lambda w, *a, **k: self.picked})()
         self.api._e.settings = {**self.api._e.settings, "file": str(Path("/w") / "wallet.mmm")}
 
-    def test_a_name_without_the_extension_gets_it(self):
-        for typed, saved in (("wallet-001", "wallet-001.mmm"), ("wallet-001.mmm", "wallet-001.mmm"),
-                             ("Wallet.MMM", "Wallet.MMM"), ("copy.v2", "copy.v2.mmm")):
+    def test_the_extension_is_there_exactly_once(self):
+        for typed, saved in (("wallet001", "wallet001.mmm"), ("wallet001.mmm", "wallet001.mmm"),
+                             ("wallet-001", "wallet-001.mmm"), ("Wallet.MMM", "Wallet.MMM"), ("copy.v2", "copy.v2.mmm"),
+                             ("wallet001.", "wallet001.mmm"), ("wallet001.mmm.", "wallet001.mmm"),
+                             ("wallet001 ", "wallet001.mmm"), ("wallet001.mmm ", "wallet001.mmm"),
+                             ("my wallet 001", "my wallet 001.mmm")):
             with self.subTest(typed=typed):
                 self.picked = (str(Path("/backups") / typed),)
                 self.api.backup()

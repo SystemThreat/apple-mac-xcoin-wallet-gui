@@ -4,7 +4,7 @@ A minimal, auditable **post-quantum** command-line wallet for xCoin (XID).
 
 ## Windows app: XID Wallet
 
-1. Download **`XID-Wallet-Windows-portable-2.0.0-test9.zip`** from this repository's
+1. Download **`XID-Wallet-Windows-portable-2.0.0-test10.zip`** from this repository's
    **Releases** page (not the green **Code** button: that zip is the source code, without
    the app's runtime, so it cannot run).
 2. Check the download (below).
@@ -20,17 +20,18 @@ menu. Wallet files stay in `C:\Users\<you>\.xcoin\`, not in the app folder.
 
 | File | Size (bytes) | SHA-256 |
 |---|---|---|
+| `XID-Wallet-Windows-portable-2.0.0-test10.zip` (latest) | 17,250,725 | `4b842fddfe7191e894f0533f18463584559e381f62a8961b7e19c613f966f0c8` |
 | `XID-Wallet-Windows-portable-2.0.0-test9.zip` | 17,250,505 | `1b77c1ef62797007cb0822373af0fa45964e6fddaafa4fddf5816174bb286638` |
 
 Check it before you open anything. In PowerShell, in the folder with the zip:
 
 ```powershell
-(Get-FileHash .\XID-Wallet-Windows-portable-2.0.0-test9.zip -Algorithm SHA256).Hash -eq '1B77C1EF62797007CB0822373AF0FA45964E6FDDAAFA4FDDF5816174BB286638'
+(Get-FileHash .\XID-Wallet-Windows-portable-2.0.0-test10.zip -Algorithm SHA256).Hash -eq '4B842FDDFE7191E894F0533F18463584559E381F62A8961B7E19C613F966F0C8'
 ```
 
 `True` means the file is exactly the one published here. `False` means it is not: delete it
 and download it again from the Releases page. On macOS or Linux:
-`shasum -a 256 XID-Wallet-Windows-portable-2.0.0-test9.zip`.
+`shasum -a 256 XID-Wallet-Windows-portable-2.0.0-test10.zip`.
 
 The same hash is in the `.sha256` file attached to the release. A copy shared any other way
 (Google Drive, a USB stick) must match this hash too. The zip is built by

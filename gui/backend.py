@@ -207,7 +207,7 @@ class Engine:
         return self._passphrase is not None
 
 
-VERSION = "2.0.0-test9"
+VERSION = "2.0.0-test10"
 _SELFTEST = None
 
 
@@ -227,6 +227,16 @@ def keytool_selftest():
             except Exception as e:
                 _SELFTEST = f"the keytool could not run: {e}"
     return _SELFTEST
+
+
+def backup_path(picked, ext=".mmm"):
+    """Where a backup goes: the name chosen in the save dialog, ending in the wallet's extension exactly once.
+    "wallet001" gets it, "wallet001.mmm" (any case) keeps the name it has, and trailing dots and spaces, which
+    Windows drops from file names, never leave "wallet001..mmm"."""
+    p = Path(picked)
+    name = p.name.rstrip(". ")
+    if not name.lower().endswith(ext.lower()): name += ext
+    return str(p.with_name(name))
 
 
 def qr_svg(text):
@@ -419,10 +429,7 @@ class Api:
             picked = self._window.create_file_dialog(webview.FileDialog.SAVE, save_filename=Path(self._e.file).name,
                                                     file_types=(f"XID wallet (*{ext})",))
             if not picked: return None
-            dest = Path(picked if isinstance(picked, str) else picked[0])
-            if dest.suffix.lower() != ext.lower():   # a name typed without it: the copy keeps the wallet's own extension
-                dest = dest.with_name(dest.name + ext)
-            return self._e.run("backup", str(dest), use_backend=False)
+            return self._e.run("backup", backup_path(picked if isinstance(picked, str) else picked[0], ext), use_backend=False)
         return self._wrap(go)
 
     # ── NTAG 424 DNA card wallets ──
