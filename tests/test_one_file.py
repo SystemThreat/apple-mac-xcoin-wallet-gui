@@ -89,6 +89,42 @@ class TestOneFile(Base):
         self.assertFalse(list(self.dir.glob("**/card-*.auth")))
         self.reader.card = blank; self.reader.moves = []
         with redirect_stderr(io.StringIO()): self.assertTrue(w._valid_seed(w.read_seed(self.wallet)))
+    def test_seed_is_locked_unless_allowed_at_creation(self):
+        d = self.make()
+        self.assertFalse(d["seed_reveal"])
+        self.assertFalse(w.seed_reveal_allowed(self.wallet, PW))
+        self.assertFalse(any("seed_reveal" in c for c in w.mmm5_cards(self.wallet.read_bytes(), PW)))   # no mark: the default is never
+    def test_allow_seed_reveal_shows_the_seed_with_card_and_passphrase(self):
+        rc, out, err = self.cli("new", "--card", "--one-file", "--offline", "--allow-seed-reveal")
+        self.assertEqual(rc, 0, err); d = json.loads(out); self.assertTrue(d["seed_reveal"])
+        self.assertTrue(w.seed_reveal_allowed(self.wallet, PW))
+        with redirect_stderr(io.StringIO()): seed = w.read_seed(self.wallet)
+        rc, out, _ = self.cli("seed", "--yes")
+        self.assertEqual(rc, 0); self.assertEqual(json.loads(out)["seed"], seed)
+        self.assertNotIn(seed, w.mmm5_cards.__doc__ or "")                        # the mark is a flag, not the seed
+        self.assertEqual(w.mmm5_cards(self.wallet.read_bytes(), PW)[0]["seed_reveal"], True)
+    def test_seed_choice_survives_sealing_and_a_backup_card(self):
+        self.cli("new", "--card", "--one-file", "--offline", "--allow-seed-reveal")
+        blank = cs.SimNTAG424()
+        self.reader.card = self.primary; self.reader.moves = [self.reader.take_off(), self.reader.place(blank)]
+        rc, _, err = self.cli("card-backup", "--auto-swap"); self.assertEqual(rc, 0, err)
+        self.assertTrue(w.seed_reveal_allowed(self.wallet, PW))
+        self.assertEqual(len(w.mmm5_cards(self.wallet.read_bytes(), PW)), 2)
+    def test_a_locked_wallet_never_shows_the_seed_even_with_the_right_card(self):
+        self.make()
+        with redirect_stderr(io.StringIO()): seed = w.read_seed(self.wallet)
+        for extra in (["--yes"], ["--yes", "--copy"]):
+            rc, out, err = self.cli("seed", *extra)
+            self.assertEqual(rc, 1); self.assertNotIn(seed, out + err); self.assertIn("never revealed", err)
+    def test_allow_seed_reveal_needs_a_one_file_card_wallet(self):
+        for argv in (["new", "--offline", "--allow-seed-reveal"], ["new", "--card", "--offline", "--allow-seed-reveal"]):
+            rc, _, err = self.cli(*argv)
+            self.assertEqual(rc, 1); self.assertIn("--allow-seed-reveal", err); self.assertFalse(self.wallet.exists())
+    def test_card_test_reads_a_one_file_wallet(self):
+        d = self.make()
+        rc, out, err = self.cli("card-test")
+        self.assertEqual(rc, 0, err); t = json.loads(out)
+        self.assertEqual((t["ok"], t["uid"], t["cards_in_wallet"]), (True, d["card_uid"], 1))
     def test_card_status_offers_backup(self):
         self.make()
         rc, out, _ = self.cli("card-status")

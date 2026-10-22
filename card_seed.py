@@ -155,6 +155,7 @@ def _unpad80(data):
 # --- transport ---------------------------------------------------------------
 
 CARD_TIMEOUT = 60           # seconds to wait for a tap; XCOIN_CARD_TIMEOUT overrides (5..300)
+CANCELLED = False           # set by a parent program (the GUI's Cancel) to end a wait for a card; never stops a write
 
 def card_timeout():
     try: return max(5, min(300, int(os.environ["XCOIN_CARD_TIMEOUT"])))
@@ -196,6 +197,7 @@ class PCSCTransport:
         try:
             states, deadline = [(n, sc.SCARD_STATE_UNAWARE) for n in names], time.monotonic() + timeout
             while (left := deadline - time.monotonic()) > 0:
+                if CANCELLED: raise CardError("cancelled")     # the app's Cancel button: only ever set while waiting
                 hr, got = sc.SCardGetStatusChange(ctx, max(1, int(min(left, 1.0) * 1000)), states)
                 if hr not in (sc.SCARD_S_SUCCESS, sc.SCARD_E_TIMEOUT):
                     raise ReaderError(f"card reader wait failed: {sc.SCardGetErrorMessage(hr)}")
@@ -529,11 +531,21 @@ def _key_file_step(uid_hex, step, *args):
 def require_blank(card, uid_hex):
     """Refuse, before anything is written, a card whose master, read or write key is off
     factory: it belongs to a wallet (maybe on another computer) and provisioning needs all three."""
-    for key_no in (KEY_APP_MASTER, KEY_READ, KEY_WRITE):
-        try: card.auth_ev2(key_no, FACTORY_KEY)
-        except CardError:
-            raise CardError(f"card {uid_hex} is not blank (its keys were changed: it already belongs to a wallet) — "
-                            "use a NEW factory-fresh card; nothing was written") from None
+    # Read key first: on a real blank card the very first login after the card arrives was refused
+    # (0x1C at step 2) when it used the master key, and passed with the read key; the master key then
+    # passed too. The write key stays last, as it always was.
+    for key_no in (KEY_READ, KEY_APP_MASTER, KEY_WRITE):
+        try:
+            try: card.auth_ev2(key_no, FACTORY_KEY)
+            except CardError:
+                # the first login after the card arrives can be refused (a real blank card answered
+                # 0x1C at step 2) and then pass: select the application again and retry once. A card
+                # whose keys were really changed fails this second login too.
+                card.select_app()
+                card.auth_ev2(key_no, FACTORY_KEY)
+        except CardError as e:
+            raise CardError(f"card {uid_hex} is not blank (its keys were changed: it already belongs to a wallet; "
+                            f"key {key_no}: {_one_line(e)}) — use a NEW factory-fresh card; nothing was written") from None
 
 def provision_card(transport, factor, family, label="", exclude=(), before_write=None, store=None):
     """Provision a FACTORY card and store the factor. Saves the auth file itself

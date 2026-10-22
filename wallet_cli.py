@@ -547,6 +547,13 @@ class Mmm5CardStore:
                 self._write(); return dict(c)
         raise WalletError(f"card {uid_hex} does not belong to this wallet")
 
+def seed_reveal_allowed(path, passphrase):
+    """Whether this one-file card wallet may ever show its seed. Chosen ONCE, when the wallet is created
+    (`new --card --one-file --allow-seed-reveal`) and kept as a mark on the card records inside the file's
+    passphrase-sealed card block; there is no command that changes it. No mark (every wallet made before
+    this choice existed included) means the seed is never shown."""
+    return any(c.get("seed_reveal") is True for c in Mmm5CardStore(path, passphrase).cards)
+
 def _head(path, n=32):
     try:
         with open(path, "rb") as f: return f.read(n)
@@ -1472,6 +1479,8 @@ def cmd_new(args):
     if p.exists(): raise WalletError(f"refusing to overwrite existing wallet {p}")
     if getattr(args, "one_file", False) and not args.card:
         raise WalletError("--one-file is for card wallets: use it with --card")
+    if getattr(args, "allow_seed_reveal", False) and not (args.card and getattr(args, "one_file", False)):
+        raise WalletError("--allow-seed-reveal is for one-file card wallets: use it with --card --one-file")
     if args.card:
         return (cmd_new_card_one_file if getattr(args, "one_file", False) else cmd_new_card)(args, p)
     pw = new_passphrase(args)
@@ -1506,6 +1515,7 @@ def cmd_new_card_one_file(args, p):
         raise WalletError("card wallet creation is interactive; use --offline for JSON")
     pw = new_passphrase(args)
     if not pw: raise WalletError("a one-file card wallet needs a passphrase (it guards the card keys kept in the file)")
+    allow_reveal = bool(getattr(args, "allow_seed_reveal", False))
     factor = cs.SecureBuffer(os.urandom(cs.FACTOR_LEN))
     seedbuf = cs.SecureBuffer(os.urandom(32))
     try:
@@ -1525,13 +1535,15 @@ def cmd_new_card_one_file(args, p):
                 if not store.cards: p.unlink(missing_ok=True)   # nothing was written to a card: no half wallet left
                 raise
             event("card-ok")
+            # the seed choice, made once and final: only "allow" leaves a mark (inside the passphrase-sealed card block)
+            if allow_reveal: store.update(record["uid"], {"seed_reveal": True})
             if permanent:
                 cs.make_permanent(record["uid"], store=store)   # commit: discard master+write keys — IRREVERSIBLE
         finally:
             provisioning_end()
         address = derive(make_backend(args), seedbuf.hex(), 0)["address"] if not args.offline else None
         data = {"file": str(p), "card_uid": record["uid"], "family": family, "passphrase_protected": True,
-                "permanent": permanent, "format": "mmm5-card", "one_file": True}
+                "permanent": permanent, "format": "mmm5-card", "one_file": True, "seed_reveal": allow_reveal}
         if address: data["address"] = address
     finally:
         seedbuf.close(); factor.close()
@@ -1540,12 +1552,15 @@ def cmd_new_card_one_file(args, p):
     print(f"  Primary card UID: {data['card_uid']}   family: {family}")
     print("  Everything is in that one file: the card's keys (under your passphrase) and the")
     print("  seed (under the card AND your passphrase). No card-<uid>.auth file is needed.")
-    print("  The seed was NEVER displayed and cannot be — the card is the key.")
+    if allow_reveal:
+        print("  The seed was not displayed. You chose to be able to show it later (`seed`, with the card and passphrase).")
+    else:
+        print("  The seed was NEVER displayed and cannot be — you chose to lock it permanently. The card is the key.")
     if permanent:
         print("  SEALED PERMANENTLY: master + write keys discarded — this card can never")
         print("  be reset or reused, and its factor can never be rewritten.")
     if "address" in data: print(f"  Primary address:  {data['address']}")
-    print("\nIMPORTANT: with no printed seed, this card is your ONLY key. Make a DUPLICATE now:")
+    print("\nIMPORTANT: " + ("write the seed down once you have shown it; until then" if allow_reveal else "with no seed to restore from,") + " this card is your ONLY key. Make a DUPLICATE now:")
     print(f"  xcoin-wallet card-backup --file {p}")
     print("Back up the .mmm file too: file + card + passphrase is the whole wallet.")
 
@@ -1712,6 +1727,12 @@ def cmd_card_status(args):
         if fmt == "mmm5-card":
             data.update(backup_supported=True, note="One-file card wallet: its card keys are sealed inside the file under the "
                         "passphrase, so no key file is needed on this Mac. Make a backup card with card-backup.")
+            pw = supplied_passphrase()   # the card list is inside the file: only with the passphrase (the GUI hands it over when unlocked)
+            if pw:
+                with contextlib.suppress(WalletError):
+                    rows = [{"uid": c.get("uid"), "label": c.get("label"), "permanent": bool(c.get("permanent")),
+                             "created": c.get("created")} for c in Mmm5CardStore(p, pw).cards]
+                    data.update(cards=rows, count=len(rows), note=f"{len(rows)} card{'s' if len(rows) != 1 else ''} open this wallet")
         else:
             data["note"] = "This card wallet was made with dex-wallet-cli, so its backup cards are made there too."
     if args.json: emit_json(data); return
@@ -1724,14 +1745,18 @@ def cmd_card_test(args):
     """Read-only proof that a provisioned card authenticates and yields a factor.
     Does not touch any wallet file; safe to run anytime."""
     cs = _card_module(); cs.disable_core_dumps()
+    p = Path(args.file)
+    # a one-file card wallet keeps its card keys INSIDE the .mmm (there is no card-<uid>.auth on disk)
+    store = Mmm5CardStore(p, card_passphrase(required=True)) if _wallet_format(p)[0] == "mmm5-card" else None
     with card_reader(cs) as t:
-        factor, auth = read_card(cs, t)
+        factor, auth = read_card(cs, t, store)
     event("card-ok")
     try:
         fam = cs.family_of(factor.bytes())
     finally:
         factor.close()
-    if args.json: emit_json({"ok": True, "uid": auth["uid"], "family": fam, "label": auth.get("label")}); return
+    if args.json: emit_json({"ok": True, "uid": auth["uid"], "family": fam, "label": auth.get("label"),
+                             "cards_in_wallet": len(store.cards) if store else None}); return
     print(f"Card OK — UID {auth['uid']}, family {fam}, label {auth.get('label','?')}")
     print("EV2 authentication succeeded and a wallet factor was read over the encrypted channel.")
 
@@ -1770,8 +1795,13 @@ def cmd_card_list(args):
 def cmd_seed(args):
     """Re-display or copy the master seed from the wallet file, with guarded output."""
     if is_card_wallet(args.file):
-        raise WalletError("this is a card-bound wallet — the seed is sealed to the card and is "
-                          "never revealed by design. Use the card to sign; back it up with `card-backup`.")
+        allowed = False
+        if _wallet_format(args.file)[0] == "mmm5-card":
+            allowed = seed_reveal_allowed(args.file, card_passphrase(required=True))
+        if not allowed:
+            raise WalletError("the seed of this card wallet is never revealed: it was created without the option to show "
+                              "the seed, and that choice is final. Use the card to sign; back it up with `card-backup` "
+                              "and keep a copy of the wallet file.")
     seed = require_seed(args)
     if args.copy:
         if not args.yes:
@@ -2300,8 +2330,9 @@ def parser():
     q.add_argument("--resettable", action="store_true", help="keep factory-key rollback (card can be reset); default is permanent/sealed")
     q.add_argument("--one-file", action="store_true", help="with --card: keep the card keys inside the .mmm (passphrase required), so no card-<uid>.auth file is needed")
     q.add_argument("--no-reveal", action="store_true", help="do not print the seed at creation: the .mmm file is the backup (`seed` can still show it later)")
+    q.add_argument("--allow-seed-reveal", action="store_true", help="with --card --one-file: allow `seed` to show the seed later (card + passphrase). FINAL: without this flag the seed can never be shown, and neither choice can be changed afterwards")
     q.set_defaults(fn=cmd_new)
-    q = sub.add_parser("card-provision", help="alias: create a card-bound wallet"); q.add_argument("--offline", action="store_true"); q.add_argument("--label"); q.add_argument("--resettable", action="store_true"); q.add_argument("--one-file", action="store_true"); q.set_defaults(fn=cmd_new, card=True, no_clear=True, no_reveal=True)
+    q = sub.add_parser("card-provision", help="alias: create a card-bound wallet"); q.add_argument("--offline", action="store_true"); q.add_argument("--label"); q.add_argument("--resettable", action="store_true"); q.add_argument("--one-file", action="store_true"); q.add_argument("--allow-seed-reveal", action="store_true"); q.set_defaults(fn=cmd_new, card=True, no_clear=True, no_reveal=True)
     q = sub.add_parser("card-backup", help="make a duplicate backup card for a card wallet"); q.add_argument("--label"); q.add_argument("--resettable", action="store_true")
     q.add_argument("--auto-swap", action="store_true", help="detect the card swap on the reader instead of waiting for Enter (for a parent program; events under XCOIN_EVENTS=1)")
     q.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS); q.set_defaults(fn=cmd_card_backup)

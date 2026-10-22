@@ -37,6 +37,31 @@ The same hash is in the `.sha256` file attached to the release. A copy shared an
 (Google Drive, a USB stick) must match this hash too. The zip is built by
 `gui/build-portable.sh` (see [gui/README.md](gui/README.md)).
 
+### Source integrity (SHA-256), 2.0.0-test11
+
+`SHA256SUMS` lists the SHA-256 of every file in this repository (110 files) except `README.md`
+and `SHA256SUMS` itself, as committed. This table holds the hash of that list, so a change to
+any file changes a hash somewhere you can see.
+
+| File | Size (bytes) | SHA-256 |
+|---|---|---|
+| `SHA256SUMS` (2.0.0-test11) | 10,281 | `516acbb7270aaccb9d3bae5f60be1156b238ac0f6695117c428f02a140dd3302` |
+| `wallet_cli.py` | | `603a3562598f78f48adb72ee427afc8a7d28667ab4c6205259c9cd05ee6889cc` |
+| `card_seed.py` | | `a9f0580b9bfecb2351763c232a3d5737d7e8100d18231f2a2f342d27fa4d671d` |
+| `gui/backend.py` | | `6950fb00c5e0469d8ee0d9bdd20d3c6995ca766b9a73bb7dea63bf4b35d42ef0` |
+
+Check it from a clone with unchanged line endings (on Windows clone with
+`git -c core.autocrlf=false clone …`, otherwise Git rewrites the files and the hashes differ):
+
+```bash
+shasum -a 256 SHA256SUMS                 # must print the SHA256SUMS hash above
+shasum -a 256 -c SHA256SUMS              # every line must say OK
+```
+
+The 2.0.0-test11 Windows zip has not been built yet: its hash goes into the first table when
+`gui/build-portable.sh` has made it. Until then, the test10 row is the latest zip, and it does
+not contain the changes listed here.
+
 ## Quick start: check a balance and send
 
 `xcoin-wallet` is the installed command (`./build.sh && ./install.sh`, see
