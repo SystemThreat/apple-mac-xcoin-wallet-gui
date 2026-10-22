@@ -1,21 +1,42 @@
 XID WALLET for Windows - portable test build @VERSION@
 =====================================================
 
-This folder runs from a USB stick on 64-bit Windows 10 or 11. Nothing is installed.
+Download the zip, extract it, double-click "XID Wallet.exe". Nothing is installed.
+It also runs from a USB stick.
 
 THIS IS A TEST BUILD. Try it with a NEW test wallet and small amounts first.
 
 
 START
 -----
-1. Copy the whole "XID Wallet" folder to the USB stick, or straight to the PC.
-   Keep everything inside the folder together.
-2. Double-click "XID Wallet.cmd".
-3. Windows may warn that the file comes from the internet or an unknown publisher.
-   This build is not code-signed yet. Choose "More info", then "Run anyway".
+1. Extract the zip: right-click it, choose "Extract All", then "Extract".
+   (Opening the exe from inside the zip does not work.)
+2. Open the extracted "XID Wallet" folder and double-click "XID Wallet.exe"
+   (the one with the xCoin logo).
+3. The first time, Windows may say "Windows protected your PC", because this
+   build is not code-signed yet. Choose "More info", then "Run anyway".
+4. Optional: in the wallet, Settings, Shortcuts, press "Add to desktop and
+   Start menu" to get an XID Wallet icon there. You can also right-click
+   XID Wallet.exe and choose "Pin to Start" or "Pin to taskbar".
 
-If the window does not open, double-click "XID Wallet (debug).cmd" instead.
-It shows any error in a black window. Send a photo of that window.
+Keep everything inside the folder together: XID Wallet.exe needs the runtime
+and app folders beside it. Move the whole folder wherever you like. For a PC,
+a good home is
+    C:\Users\<you>\AppData\Local\Programs\XID Wallet
+which is where Windows keeps per-user apps.
+
+If the window does not open, open the "app" folder and double-click
+"XID Wallet (debug).cmd". It shows any error in a black window. Send a photo
+of that window.
+
+
+CHECK THE DOWNLOAD
+------------------
+The SHA-256 of the zip is published beside it (the .sha256 file, and the
+README of the GitHub repository). To check it, open PowerShell where the zip
+is and run:
+    Get-FileHash .\XID-Wallet-Windows-portable-@VERSION@.zip
+The Hash it prints must match the published one exactly.
 
 
 WHAT IT NEEDS

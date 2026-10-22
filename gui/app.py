@@ -19,6 +19,7 @@ import webview
 from backend import Api, HERE
 
 UI = HERE / "ui" if (HERE / "ui").exists() else Path(__file__).resolve().parent / "ui"
+ICON = Path(__file__).resolve().parent / "assets" / "xid-wallet.ico"   # the xCoin mark, made by assets/make_icon.py
 
 
 def main():
@@ -26,7 +27,8 @@ def main():
     window = webview.create_window("XID Wallet", url=(UI / "index.html").as_uri(), js_api=api,
                                    width=1180, height=800, min_size=(880, 620), background_color="#0b0c08")
     api._window = window   # private: pywebview neither walks nor exposes underscore names
-    webview.start(debug="--debug" in sys.argv, http_server=False, private_mode=True)
+    icon = str(ICON) if sys.platform == "win32" and ICON.exists() else None   # title bar and taskbar (Windows reads .ico)
+    webview.start(debug="--debug" in sys.argv, http_server=False, private_mode=True, icon=icon)
 
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ python -m venv gui\.venv-build
 Write-Host "== app"
 $ui = Join-Path $root "gui\ui"
 & gui\.venv-build\Scripts\pyinstaller --noconfirm --clean --windowed --name "XID Wallet" `
-  --icon gui\assets\xid-wallet.png --paths $root --hidden-import card_seed --hidden-import wallet_cli `
+  --icon gui\assets\xid-wallet.ico --paths $root --hidden-import card_seed --hidden-import wallet_cli `
   --add-data "$ui\index.html;ui" --add-data "$ui\app.js;ui" --add-data "$ui\styles.css;ui" --add-data "$ui\fonts.css;ui" `
   --add-data "$ui\identicon.js;ui" --add-data "$ui\fonts;ui\fonts" `
   --add-binary "xcoin-wallet.exe;." `
