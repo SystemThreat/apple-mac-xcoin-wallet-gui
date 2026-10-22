@@ -33,7 +33,7 @@ python3 -m venv "$WORK/sig" && "$WORK/sig/bin/pip" install -q sigstore
 echo "== Windows libraries (cp312, win_amd64)"
 python3 -m venv "$WORK/pip" && "$WORK/pip/bin/pip" install -q --upgrade pip
 "$WORK/pip/bin/pip" install -q --target "$WORK/site" --platform win_amd64 --python-version 3.12 --implementation cp --abi cp312 \
-  --only-binary=:all: --no-deps pywebview bottle typing_extensions pythonnet clr_loader cffi pycparser qrcode colorama cryptography pyscard
+  --only-binary=:all: --no-deps pywebview bottle typing_extensions pythonnet clr_loader cffi pycparser qrcode colorama cryptography pyscard truststore
 "$WORK/pip/bin/pip" install -q --target "$WORK/site" --no-deps proxy_tools   # pure Python, published as source only
 
 echo "== assemble"

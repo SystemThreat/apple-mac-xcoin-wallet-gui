@@ -135,7 +135,7 @@ class Engine:
         return self._passphrase is not None
 
 
-VERSION = "2.0.0-test1"
+VERSION = "2.0.0-test3"
 _SELFTEST = None
 
 
@@ -170,23 +170,26 @@ def qr_svg(text):
 class Api:
     """What the page can call (window.pywebview.api.*). Every method returns {"ok": ...} or {"error": "..."}."""
     def __init__(self):
-        self.e = Engine()
-        self.window = None
+        self._e = Engine()
+        self._window = None
+
+    _NO_READER = ("Smart Card Resource Manager is not running", "0x8010001D", "No readers", "no smart card reader", "0x8010002E")
 
     def _wrap(self, fn, *a, **k):
         try:
             return {"ok": fn(*a, **k)}
-        except w.WalletError as ex:
-            return {"error": str(ex)}
         except Exception as ex:   # never a traceback in the window
-            return {"error": f"{type(ex).__name__}: {ex}"}
+            msg = str(ex) if isinstance(ex, w.WalletError) else f"{type(ex).__name__}: {ex}"
+            if any(t.lower() in msg.lower() for t in self._NO_READER):   # Windows starts its card service only when a reader is attached
+                msg = "No card reader found. Plug in the USB card reader (for example an ACS ACR1252U), wait a few seconds, and try again."
+            return {"error": msg}
 
     # ── state and settings ──
     def state(self):
         def go():
-            fmt, card = w._wallet_format(self.e.file)
-            return {"file": self.e.file, "exists": Path(self.e.file).exists(), "format": fmt, "card": card,
-                    "unlocked": self.e.unlocked, "settings": self.e.settings, "identity_index": IDENTITY_INDEX,
+            fmt, card = w._wallet_format(self._e.file)
+            return {"file": self._e.file, "exists": Path(self._e.file).exists(), "format": fmt, "card": card,
+                    "unlocked": self._e.unlocked, "settings": self._e.settings, "identity_index": IDENTITY_INDEX,
                     "version": VERSION, "platform": sys.platform, "card_software": w.card_modules_missing() is None,
                     "selftest": keytool_selftest()}
         return self._wrap(go)
@@ -196,9 +199,9 @@ class Api:
             if key not in ("theme", "explorer", "hrp", "file"): raise w.WalletError(f"unknown setting {key}")
             if key == "hrp" and value not in ("xpa", "txa"): raise w.WalletError("network must be xpa (mainnet) or txa (testnet)")
             if key == "theme" and value not in ("system", "light", "dark"): raise w.WalletError("theme must be system, light or dark")
-            if key in ("file", "hrp"): self.e.lock()
-            self.e.settings[key] = value; self.e.save_settings()
-            return self.e.settings
+            if key in ("file", "hrp"): self._e.lock()
+            self._e.settings[key] = value; self._e.save_settings()
+            return self._e.settings
         return self._wrap(go)
 
     def wallets(self):
@@ -210,10 +213,10 @@ class Api:
     def choose_wallet_file(self):
         def go():
             import webview
-            picked = self.window.create_file_dialog(webview.FileDialog.OPEN, directory=str(Path.home() / ".xcoin"),
+            picked = self._window.create_file_dialog(webview.FileDialog.OPEN, directory=str(Path.home() / ".xcoin"),
                                                     file_types=("XID wallet (*.mmm)", "All files (*.*)"))
             if not picked: return None
-            self.e.lock(); self.e.settings["file"] = picked[0]; self.e.save_settings()
+            self._e.lock(); self._e.settings["file"] = picked[0]; self._e.save_settings()
             return picked[0]
         return self._wrap(go)
 
@@ -221,11 +224,11 @@ class Api:
     def create(self, passphrase, path=None):
         def go():
             if len(passphrase) < 8: raise w.WalletError("use a passphrase of at least 8 characters")
-            if path: self.e.settings["file"] = path
-            self.e.save_settings()
-            made = self.e.run("new", "--offline", passphrase=passphrase, use_backend=False)
-            seed = self.e.run("seed", "--yes", passphrase=passphrase, use_backend=False)["seed"]
-            self.e.unlock(passphrase)
+            if path: self._e.settings["file"] = path
+            self._e.save_settings()
+            made = self._e.run("new", "--offline", passphrase=passphrase, use_backend=False)
+            seed = self._e.run("seed", "--yes", passphrase=passphrase, use_backend=False)["seed"]
+            self._e.unlock(passphrase)
             return {"file": made["file"], "seed": seed}
         return self._wrap(go)
 
@@ -234,44 +237,44 @@ class Api:
             s = "".join(seed.split()).lower()
             if not w._valid_seed(s): raise w.WalletError("that is not a valid seed: 64 hexadecimal characters (0-9, a-f)")
             if len(passphrase) < 8: raise w.WalletError("use a passphrase of at least 8 characters")
-            if path: self.e.settings["file"] = path
-            self.e.save_settings()
-            self.e.run("restore", s, passphrase=passphrase, use_backend=False)
-            self.e.unlock(passphrase)
-            return {"file": self.e.file}
+            if path: self._e.settings["file"] = path
+            self._e.save_settings()
+            self._e.run("restore", s, passphrase=passphrase, use_backend=False)
+            self._e.unlock(passphrase)
+            return {"file": self._e.file}
         return self._wrap(go)
 
     def unlock(self, passphrase):
-        return self._wrap(lambda: (self.e.unlock(passphrase), True)[1])
+        return self._wrap(lambda: (self._e.unlock(passphrase), True)[1])
 
     def lock(self):
-        return self._wrap(lambda: (self.e.lock(), True)[1])
+        return self._wrap(lambda: (self._e.lock(), True)[1])
 
     def reveal_seed(self, passphrase):
-        return self._wrap(lambda: self.e.run("seed", "--yes", passphrase=passphrase, use_backend=False)["seed"])
+        return self._wrap(lambda: self._e.run("seed", "--yes", passphrase=passphrase, use_backend=False)["seed"])
 
     # ── addresses and identity ──
     def receive(self, index=0):
         def go():
             payment_index(index)
-            if not self.e.unlocked or not self.e.pub: raise w.WalletError("The wallet is locked.")
-            p = self.e.pub
+            if not self._e.unlocked or not self._e.pub: raise w.WalletError("The wallet is locked.")
+            p = self._e.pub
             return {"address": p["address"], "carried_address": p["carried_address"], "index": 0, "qr": qr_svg(p["address"])}
         return self._wrap(go)
 
     def identity(self):
         def go():
-            if not self.e.unlocked or not self.e.pub: raise w.WalletError("The wallet is locked.")
-            return {"identity": self.e.pub["identity"], "index": IDENTITY_INDEX}
+            if not self._e.unlocked or not self._e.pub: raise w.WalletError("The wallet is locked.")
+            return {"identity": self._e.pub["identity"], "index": IDENTITY_INDEX}
         return self._wrap(go)
 
     # ── chain ──
     def balance(self, index=0):
         def go():
             payment_index(index)
-            result, mature, immature = self.e.scan()
+            result, mature, immature = self._e.scan()
             sp = sum((u["amount"] for u in mature), w.Decimal(0)); im = sum((u["amount"] for u in immature), w.Decimal(0))
-            return {"address": self.e.pub["address"], "spendable": w.fmt8(sp), "immature": w.fmt8(im), "total": w.fmt8(sp + im),
+            return {"address": self._e.pub["address"], "spendable": w.fmt8(sp), "immature": w.fmt8(im), "total": w.fmt8(sp + im),
                     "utxos": len(mature) + len(immature), "height": result.get("height")}
         return self._wrap(go)
 
@@ -279,17 +282,17 @@ class Api:
         """The unspent outputs (what the explorer can list; full history needs a node or the explorer's page)."""
         def go():
             payment_index(index)
-            _, mature, immature = self.e.scan()
+            _, mature, immature = self._e.scan()
             return [{"txid": u["txid"], "vout": u["vout"], "amount": w.fmt8(u["amount"]), "kind": u["kind"], "height": u.get("height"),
                      "confirmations": u["confirmations"], "coinbase": bool(u.get("coinbase")), "spendable": u not in immature,
                      **({"blocks_to_maturity": u["blocks_to_maturity"]} if u in immature else {})} for u in mature + immature]
         return self._wrap(go)
 
     def send_preview(self, destination, amount, index=0):
-        return self._wrap(lambda: self.e.run("send", destination.strip(), str(amount).strip(), "--index", payment_index(index), "--dry-run"))
+        return self._wrap(lambda: self._e.run("send", destination.strip(), str(amount).strip(), "--index", payment_index(index), "--dry-run"))
 
     def send(self, destination, amount, index=0):
-        return self._wrap(lambda: self.e.run("send", destination.strip(), str(amount).strip(), "--index", payment_index(index), "--yes"))
+        return self._wrap(lambda: self._e.run("send", destination.strip(), str(amount).strip(), "--index", payment_index(index), "--yes"))
 
     def open_url(self, url):
         """Explorer links open in the system browser; only http(s) links."""
@@ -302,10 +305,10 @@ class Api:
     def backup(self):
         def go():
             import webview
-            picked = self.window.create_file_dialog(webview.FileDialog.SAVE, save_filename=Path(self.e.file).name)
+            picked = self._window.create_file_dialog(webview.FileDialog.SAVE, save_filename=Path(self._e.file).name)
             if not picked: return None
             dest = picked if isinstance(picked, str) else picked[0]
-            return self.e.run("backup", dest, use_backend=False)
+            return self._e.run("backup", dest, use_backend=False)
         return self._wrap(go)
 
     # ── NTAG 424 DNA card wallets ──
@@ -314,32 +317,32 @@ class Api:
         `permanent` (a sealed card can never be reset or reused). Needs the card on the reader."""
         def go():
             if len(passphrase) < 8: raise w.WalletError("use a passphrase of at least 8 characters")
-            before = self.e.settings["file"]
-            if path: self.e.settings["file"] = path
-            elif Path(self.e.file).exists():
-                d = Path(self.e.file).parent
-                self.e.settings["file"] = str(next(d / f"card-wallet-{i}.mmm" for i in range(1, 1000) if not (d / f"card-wallet-{i}.mmm").exists()))
+            before = self._e.settings["file"]
+            if path: self._e.settings["file"] = path
+            elif Path(self._e.file).exists():
+                d = Path(self._e.file).parent
+                self._e.settings["file"] = str(next(d / f"card-wallet-{i}.mmm" for i in range(1, 1000) if not (d / f"card-wallet-{i}.mmm").exists()))
             argv = ["new", "--card", "--one-file", "--offline", "--label", (label or "primary")[:32]]
             if not permanent: argv.append("--resettable")
             try:
-                made = self.e.run(*argv, passphrase=passphrase, use_backend=False)
+                made = self._e.run(*argv, passphrase=passphrase, use_backend=False)
             except Exception:
-                self.e.settings["file"] = before   # nothing was made: keep the wallet that was open
+                self._e.settings["file"] = before   # nothing was made: keep the wallet that was open
                 raise
-            self.e.save_settings()
+            self._e.save_settings()
             return made
         return self._wrap(go)
 
     def card_test(self):
-        return self._wrap(lambda: self.e.run("card-test", use_backend=False))
+        return self._wrap(lambda: self._e.run("card-test", use_backend=False))
 
     def card_status(self):
-        return self._wrap(lambda: self.e.run("card-status", use_backend=False))
+        return self._wrap(lambda: self._e.run("card-status", use_backend=False))
 
     def card_reset(self):
         def go():
-            out = self.e.run("card-reset", "--yes", use_backend=False)
-            self.e.lock()
+            out = self._e.run("card-reset", "--yes", use_backend=False)
+            self._e.lock()
             return out
         return self._wrap(go)
 

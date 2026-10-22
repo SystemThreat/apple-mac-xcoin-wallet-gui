@@ -8,6 +8,12 @@ through pywebview's bridge only: no web server, no open port, nothing fetched fr
 import sys
 from pathlib import Path
 
+try:   # verify HTTPS with the operating system's own certificate checks: a fresh Windows fetches missing roots on demand,
+    import truststore   # which Python's built-in bundle never asks it to do (balances would fail CERTIFICATE_VERIFY_FAILED)
+    truststore.inject_into_ssl()
+except ImportError:
+    pass
+
 import webview
 
 from backend import Api, HERE
@@ -19,7 +25,7 @@ def main():
     api = Api()
     window = webview.create_window("XID Wallet", url=(UI / "index.html").as_uri(), js_api=api,
                                    width=1180, height=800, min_size=(880, 620), background_color="#0b0c08")
-    api.window = window
+    api._window = window   # private: pywebview neither walks nor exposes underscore names
     webview.start(debug="--debug" in sys.argv, http_server=False, private_mode=True)
 
 
