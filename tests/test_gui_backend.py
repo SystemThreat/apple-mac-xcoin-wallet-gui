@@ -50,6 +50,28 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class TestBackup(unittest.TestCase):
+    """The backup copy keeps the wallet's extension, even when the name typed in the save dialog has none."""
+    def setUp(self):
+        self.api = backend.Api()
+        self.calls, self.picked = [], None
+        self.api._e.run = lambda *argv, **k: self.calls.append(argv) or {"backup": argv[1]}
+        self.api._window = type("Window", (), {"create_file_dialog": lambda w, *a, **k: self.picked})()
+        self.api._e.settings = {**self.api._e.settings, "file": str(Path("/w") / "wallet.mmm")}
+
+    def test_a_name_without_the_extension_gets_it(self):
+        for typed, saved in (("wallet-001", "wallet-001.mmm"), ("wallet-001.mmm", "wallet-001.mmm"),
+                             ("Wallet.MMM", "Wallet.MMM"), ("copy.v2", "copy.v2.mmm")):
+            with self.subTest(typed=typed):
+                self.picked = (str(Path("/backups") / typed),)
+                self.api.backup()
+                self.assertEqual(self.calls[-1][:2], ("backup", str(Path("/backups") / saved)))
+
+    def test_cancelled_dialog_copies_nothing(self):
+        self.picked = None
+        self.assertEqual(self.api.backup(), {"ok": None}); self.assertEqual(self.calls, [])
+
+
 class TestBalanceArithmetic(unittest.TestCase):
     """The balance right after a send is plain subtraction (before - sent - fee), not 'everything went out'
     until the change confirms; and it is the same number after the block."""

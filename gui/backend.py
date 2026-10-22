@@ -415,10 +415,14 @@ class Api:
     def backup(self):
         def go():
             import webview
-            picked = self._window.create_file_dialog(webview.FileDialog.SAVE, save_filename=Path(self._e.file).name)
+            ext = Path(self._e.file).suffix or ".mmm"
+            picked = self._window.create_file_dialog(webview.FileDialog.SAVE, save_filename=Path(self._e.file).name,
+                                                    file_types=(f"XID wallet (*{ext})",))
             if not picked: return None
-            dest = picked if isinstance(picked, str) else picked[0]
-            return self._e.run("backup", dest, use_backend=False)
+            dest = Path(picked if isinstance(picked, str) else picked[0])
+            if dest.suffix.lower() != ext.lower():   # a name typed without it: the copy keeps the wallet's own extension
+                dest = dest.with_name(dest.name + ext)
+            return self._e.run("backup", str(dest), use_backend=False)
         return self._wrap(go)
 
     # ── NTAG 424 DNA card wallets ──
