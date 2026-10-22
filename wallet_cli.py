@@ -106,8 +106,13 @@ def broadcast_begin(n):
     if os.getenv("XCOIN_EVENTS") == "1":
         event("broadcast-begin", n)   # strict write: a parent already gone means nobody records the send, so send nothing
     COMMITTED = True
-    signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+    ignore_sigpipe()
     if os.getenv("XCOIN_EVENTS") == "1": time.sleep(BROADCAST_GRACE)
+
+def ignore_sigpipe():
+    """Writes to a gone parent are dropped instead of killing the CLI. Windows has no SIGPIPE: a write
+    to a closed pipe raises OSError there, which say() already swallows."""
+    if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
 _SIGTERM_SET_ASIDE = []   # the SIGTERM handler a card write set aside; provisioning_end() restores it
 
@@ -123,7 +128,7 @@ def provisioning_begin():
     events = os.getenv("XCOIN_EVENTS") == "1"
     if events: event("card-provisioning")
     COMMITTED = True
-    signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+    ignore_sigpipe()
     if events: time.sleep(BROADCAST_GRACE)
     _SIGTERM_SET_ASIDE.append(signal.signal(signal.SIGTERM, signal.SIG_IGN))
 
@@ -576,6 +581,8 @@ def can_prompt():
     in its own process group (NerdMiner login) is not: reading the terminal would
     get it SIGTTIN and a silent hang, so it must report that it cannot ask and let
     the parent ask instead (the text below is what NerdMiner looks for)."""
+    if os.name == "nt":   # Windows has no process groups on the console: a console stdin is ours to read
+        return sys.stdin.isatty()
     try:
         return sys.stdin.isatty() and os.tcgetpgrp(sys.stdin.fileno()) == os.getpgrp()
     except OSError:
@@ -1151,10 +1158,15 @@ class RPC:
             raise WalletError(f"RPC {method}: {msg}")
         return result.get("result")
 
+KEYTOOL_NAME = "xcoin-wallet.exe" if os.name == "nt" else "xcoin-wallet"
+
 def keytool_path():
-    """The native ML-DSA keytool binary (offline signer), alongside this script."""
-    p = Path(__file__).resolve().parent / "xcoin-wallet"
-    return p if p.exists() and os.access(p, os.X_OK) else None
+    """The native ML-DSA keytool binary (offline signer), alongside this script (or, in the
+    packaged Windows app, alongside the program)."""
+    for base in (Path(__file__).resolve().parent, Path(sys.executable).resolve().parent):
+        p = base / KEYTOOL_NAME
+        if p.exists() and os.access(p, os.X_OK): return p
+    return None
 
 def sign_offline(seed, raw, prev):
     """Sign the raw tx with the native keytool — the seed never leaves this host

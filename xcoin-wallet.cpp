@@ -36,15 +36,24 @@
 #include <vector>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <unistd.h>
 #include <fcntl.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <direct.h>
+#include <io.h>
+#else
+#include <unistd.h>
 #include <pwd.h>
-
-#include <CommonCrypto/CommonDigest.h>   // macOS SHA-256 (no external libs)
+#endif
 
 extern "C" {
 #include "fips202.h"                     // PQClean SHAKE-256 (incremental API)
+#include "sha2.h"                        // PQClean SHA-256: the node's own code, the same on every OS
+#include "randombytes.h"                 // the OS random source (randombytes.c)
 }
+static void xw_sha256(const uint8_t* d, size_t n, uint8_t out[32]) { ::sha256(out, d, n); }
 
 // PQClean ML-DSA-65 deterministic keygen + signing (from the node's own sources)
 extern "C" {
@@ -59,7 +68,7 @@ extern "C" {
 extern "C" {
     int PQCLEAN_SPHINCSSHA2128SSIMPLE_CLEAN_crypto_sign_seed_keypair(uint8_t* pk, uint8_t* sk, const uint8_t* seed);
 }
-#include <cstdlib>   // arc4random_buf — macOS CSPRNG for fresh seed generation
+#include <cstdlib>
 #include <algorithm> // std::lexicographical_compare (the sorted XCoinBranch)
 
 using bytes = std::vector<uint8_t>;
@@ -107,7 +116,7 @@ static bool from_hex(const std::string& s, std::vector<uint8_t>& out) {
 }
 
 static void wipe(bytes& v) { if (!v.empty()) memset(v.data(), 0, v.size()); v.clear(); }
-static bytes sha256(const bytes& d) { bytes h(32); CC_SHA256(d.data(), (CC_LONG)d.size(), h.data()); return h; }
+static bytes sha256(const bytes& d) { bytes h(32); xw_sha256(d.data(), d.size(), h.data()); return h; }
 
 // ── HD derivation (ML-DSA: exactly src/pqhd.cpp DerivePQKeyFromSeed; SLH: dex's) ────
 // Ported from dex-wallet-cli's keytool (derive_child_seed / derive_slh_seed /
@@ -271,7 +280,7 @@ static bool parse_tx(const std::vector<uint8_t>& raw, Tx& tx) {
 }
 
 static void dsha256(const uint8_t* d, size_t n, uint8_t out[32]) {
-    uint8_t h[32]; CC_SHA256(d,(CC_LONG)n,h); CC_SHA256(h,32,out);
+    uint8_t h[32]; xw_sha256(d, n, h); xw_sha256(h, 32, out);
 }
 static void dsha256(const std::vector<uint8_t>& d, uint8_t out[32]) { dsha256(d.data(), d.size(), out); }
 
@@ -322,7 +331,7 @@ static const char* TAG_SIGHASH_V3     = "XCoinSighash/v3";  // step 2: the xCoin
 static const char* TAG_NOKEY          = "xcoin/v3/nokey";   // plain SHA-256, NOT tagged
 static std::string g_hrp = "xpa";           // --hrp txa (or XCOIN_HRP=txa) for testnet A
 
-static void ssha256(const uint8_t* d, size_t n, uint8_t out[32]) { CC_SHA256(d, (CC_LONG)n, out); }
+static void ssha256(const uint8_t* d, size_t n, uint8_t out[32]) { xw_sha256(d, n, out); }
 static void ssha256(const std::vector<uint8_t>& d, uint8_t out[32]) { ssha256(d.data(), d.size(), out); }
 // BIP-340 style tagged hash: SHA256(SHA256(tag) || SHA256(tag) || msg).
 static void tagged_hash(const char* tag, const std::vector<uint8_t>& msg, uint8_t out[32]) {
@@ -401,10 +410,17 @@ static std::string identity_from_hash(const bytes& pq_hash) { return bech32m_ide
 
 // ── wallet file (seed at rest) ────────────────────────────────────────────────
 static std::string home_dir() {
+#ifdef _WIN32
+    const char* h = getenv("USERPROFILE");      // C:\Users\<name>: only that user (and admins) can read it
+    if (h && *h) return h;
+    const char* d = getenv("HOMEDRIVE"); const char* p = getenv("HOMEPATH");
+    return (d && p) ? std::string(d) + p : ".";
+#else
     const char* h = getenv("HOME");
     if (h && *h) return h;
     struct passwd* pw = getpwuid(getuid());
     return pw ? pw->pw_dir : ".";
+#endif
 }
 static std::string default_wallet_path() { return home_dir() + "/.xcoin/wallet.seed"; }
 
@@ -420,15 +436,26 @@ static bool read_seed_file(const std::string& path, std::string& seedhex) {
     return !seedhex.empty();
 }
 static bool write_seed_file(const std::string& path, const std::string& seedhex) {
-    std::string dir = path.substr(0, path.find_last_of('/'));
+    std::string dir = path.substr(0, path.find_last_of("/\\"));
+    std::string line = seedhex + "\n";
+#ifdef _WIN32
+    // Windows has no 0600: files under the user's profile inherit an ACL that admits only that user,
+    // SYSTEM and administrators.
+    _mkdir(dir.c_str());
+    int fd = _open(path.c_str(), _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, _S_IREAD | _S_IWRITE);
+    if (fd < 0) return false;
+    int w = _write(fd, line.c_str(), (unsigned)line.size());
+    _close(fd);
+    return w == (int)line.size();
+#else
     mkdir(dir.c_str(), 0700);
     int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
     if (fd < 0) return false;
-    std::string line = seedhex + "\n";
     ssize_t w = write(fd, line.c_str(), line.size());
     close(fd);
     chmod(path.c_str(), 0600);
     return w == (ssize_t)line.size();
+#endif
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
@@ -842,6 +869,14 @@ static int cmd_v3vectors() {
 }
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    // UTF-8 output and ANSI colours in the Windows console (Windows 10 and later)
+    SetConsoleOutputCP(CP_UTF8);
+    for (DWORD which : {STD_OUTPUT_HANDLE, STD_ERROR_HANDLE}) {
+        HANDLE h = GetStdHandle(which); DWORD mode = 0;
+        if (h != INVALID_HANDLE_VALUE && GetConsoleMode(h, &mode)) SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    }
+#endif
     if (argc < 2) { usage(); return 1; }
     bool hrp_flag = false;
     for (int i = 2; i < argc; i++)
@@ -896,13 +931,14 @@ int main(int argc, char** argv) {
             fprintf(stderr, "  or create a second wallet with:  xcoin-wallet new --file <other-path>\n");
             return 1;
         }
-        uint8_t s[32]; arc4random_buf(s, 32);
+        uint8_t s[32];
+        if (randombytes(s, 32) != 0) { fprintf(stderr, "%serror:%s the system random source failed; no wallet was made\n", RED, R); return 1; }
         std::string seedhex = to_hex(s, 32);
         std::vector<uint8_t> seed(s, s + 32); memset(s, 0, sizeof(s));
         if (!write_seed_file(file, seedhex)) { fprintf(stderr, "%serror:%s could not write %s\n", RED, R, file.c_str()); return 1; }
         printf("\n  %s%s⚠  BACK UP YOUR SEED — this is the ONLY way to recover your coins:%s\n", B, YEL, R);
         printf("  %s%s%s%s\n", B, YEL, seedhex.c_str(), R);
-        printf("  %sSaved (encrypted at rest by your Mac's FileVault) to: %s%s\n", DIM, file.c_str(), R);
+        printf("  %sSaved to: %s (keep this disk encrypted: FileVault, BitLocker or LUKS)%s\n", DIM, file.c_str(), R);
         printf("  %sWrite the 64-hex seed on paper/metal and store it offline. Do not screenshot or upload it.%s\n", DIM, R);
         int rc = derive_and_print(seed);
         wipe_reminder(false);

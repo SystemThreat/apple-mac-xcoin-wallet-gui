@@ -77,6 +77,15 @@ def _get_libc():
         _libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
     return _libc
 
+def _lock(addr, n):
+    """Keep n bytes at addr out of swap: mlock on macOS and Linux, VirtualLock on Windows."""
+    if os.name == "nt": return ctypes.windll.kernel32.VirtualLock(ctypes.c_void_p(addr), ctypes.c_size_t(n)) != 0
+    return _get_libc().mlock(ctypes.c_void_p(addr), ctypes.c_size_t(n)) == 0
+
+def _unlock(addr, n):
+    if os.name == "nt": ctypes.windll.kernel32.VirtualUnlock(ctypes.c_void_p(addr), ctypes.c_size_t(n))
+    else: _get_libc().munlock(ctypes.c_void_p(addr), ctypes.c_size_t(n))
+
 def disable_core_dumps():
     try:
         import resource
@@ -92,7 +101,7 @@ class SecureBuffer:
         if self.buf:
             try:
                 addr = ctypes.addressof((ctypes.c_char * len(self.buf)).from_buffer(self.buf))
-                self._locked = _get_libc().mlock(addr, len(self.buf)) == 0
+                self._locked = _lock(addr, len(self.buf))
             except Exception:
                 self._locked = False
     def bytes(self): return bytes(self.buf)
@@ -102,7 +111,7 @@ class SecureBuffer:
         if self._locked:
             try:
                 addr = ctypes.addressof((ctypes.c_char * len(self.buf)).from_buffer(self.buf))
-                _get_libc().munlock(addr, len(self.buf))
+                _unlock(addr, len(self.buf))
             except Exception: pass
         self.buf = bytearray()
     def __enter__(self): return self
