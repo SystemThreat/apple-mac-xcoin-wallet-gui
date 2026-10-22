@@ -207,7 +207,7 @@ class Engine:
         return self._passphrase is not None
 
 
-VERSION = "2.0.0-test6"
+VERSION = "2.0.0-test7"
 _SELFTEST = None
 
 
