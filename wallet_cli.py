@@ -12,7 +12,7 @@ fallback leaf 0xc2}; the single-leaf tree {ML-DSA-65 leaf} of the same key (the
 counted and spent. Derivation and signing live in the native keytool.
 """
 
-import argparse, base64, contextlib, getpass, hashlib, hmac, importlib, ipaddress, json, os, re, shutil, signal, subprocess, sys, time, urllib.request, urllib.error
+import argparse, base64, contextlib, getpass, hashlib, hmac, importlib, ipaddress, json, os, re, shutil, signal, subprocess, sys, threading, time, urllib.request, urllib.error
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from pathlib import Path
 
@@ -112,7 +112,8 @@ def broadcast_begin(n):
 def ignore_sigpipe():
     """Writes to a gone parent are dropped instead of killing the CLI. Windows has no SIGPIPE: a write
     to a closed pipe raises OSError there, which say() already swallows."""
-    if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+    if hasattr(signal, "SIGPIPE") and threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
 _SIGTERM_SET_ASIDE = []   # the SIGTERM handler a card write set aside; provisioning_end() restores it
 
@@ -130,7 +131,10 @@ def provisioning_begin():
     COMMITTED = True
     ignore_sigpipe()
     if events: time.sleep(BROADCAST_GRACE)
-    _SIGTERM_SET_ASIDE.append(signal.signal(signal.SIGTERM, signal.SIG_IGN))
+    # signal.signal works on the main thread only: the GUI runs this on a worker thread, where
+    # SIGTERM is never delivered anyway
+    if threading.current_thread() is threading.main_thread():
+        _SIGTERM_SET_ASIDE.append(signal.signal(signal.SIGTERM, signal.SIG_IGN))
 
 def provisioning_end():
     """SIGTERM stops the CLI again (SIGPIPE stays ignored: output to a gone parent is dropped)."""
