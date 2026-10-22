@@ -139,7 +139,7 @@ class Engine:
         return self._passphrase is not None
 
 
-VERSION = "2.0.0-test4"
+VERSION = "2.0.0-test5"
 _SELFTEST = None
 
 
@@ -293,7 +293,8 @@ class Api:
         return self._wrap(go)
 
     def send_preview(self, destination, amount, index=0):
-        return self._wrap(lambda: self._e.run("send", destination.strip(), str(amount).strip(), "--index", payment_index(index), "--dry-run"))
+        # --yes skips the CLI's "Type SEND" question, which JSON mode refuses; --dry-run is what keeps it from broadcasting
+        return self._wrap(lambda: self._e.run("send", destination.strip(), str(amount).strip(), "--index", payment_index(index), "--dry-run", "--yes"))
 
     def send(self, destination, amount, index=0):
         return self._wrap(lambda: self._e.run("send", destination.strip(), str(amount).strip(), "--index", payment_index(index), "--yes"))

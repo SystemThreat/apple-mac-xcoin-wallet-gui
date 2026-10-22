@@ -628,6 +628,7 @@ class TestProvisioningCommit(Faulty):
         self.assertEqual(signal.getsignal(signal.SIGTERM), before)
         self.assertFalse((self.dir / "second.mmm").exists())
 
+@unittest.skipIf(os.name == "nt", "POSIX signals and pipes: the macOS/Linux parent protocol (SIGTERM, SIGPIPE) has no Windows equivalent")
 class TestProvisioningProcess(unittest.TestCase):
     """card-backup --auto-swap as a real child process on real pipes, with simulated cards whose
     state the child saves after every APDU. The parent plays MMM: it reads the events, and
@@ -737,6 +738,7 @@ sys.exit(w.main(["--file", str(d / "w.mmm"), *sys.argv[6:], "card-backup", "--au
                     self.assertTrue(self.assert_whole(rc))                              # untouched, no key file for it
                     self.assertEqual(len(list(self.d.glob("card-*.auth"))), 1)          # the wallet card's only
 
+@unittest.skipIf(os.name == "nt", "POSIX signals and pipes: the macOS/Linux parent protocol (SIGTERM, SIGPIPE) has no Windows equivalent")
 class TestNewCardProcess(unittest.TestCase):
     """new --card as a real child process on real pipes (the way MMM runs it: --offline, events on),
     with a simulated blank card whose state the child saves after every APDU. The parent plays MMM."""
