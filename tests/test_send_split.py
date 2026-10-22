@@ -27,7 +27,7 @@ def cli_sleeps(record):
 RATE = Decimal("0.0001")          # FakeRPC's fallbackfee: the rate every node-path test pays
 FLOOR = w.DUST_CHANGE
 SPLIT_KEYS = {"broadcast", "txid", "txids", "transactions", "amount", "fee", "vsize", "change",
-              "inputs", "carried_inputs", "signer", "partial"}
+              "inputs", "carried_inputs", "signer", "partial", "spent", "change_outputs"}
 
 def coins(n, each, spk=T.SPK, kind="two_leaf"):
     return [dict(T.utxo(f"{i:064x}", 0, each, 10, 200, spk=spk), kind=kind) for i in range(n)]

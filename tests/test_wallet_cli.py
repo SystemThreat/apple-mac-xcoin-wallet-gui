@@ -1200,6 +1200,9 @@ class TestTwoLeafAndCarried(Base):
         fee = w.fee_for(2, 2, Decimal("0.0001"))
         self.assertEqual(d["fee"], w.fmt8(fee))
         self.assertEqual(Decimal(outputs[1][own(0, "txa")["address"]]), Decimal("5") - Decimal("4") - fee)
+        # the report names the coins spent and the change output (what the app shows before the next block)
+        self.assertEqual(d["spent"], ["t1:0", "c1:0"])
+        self.assertEqual(d["change_outputs"], [{"txid": d["txid"], "vout": 1, "amount": w.fmt8(Decimal("5") - Decimal("4") - fee)}])
     def test_send_can_spend_only_carried(self):
         carried = own(0)["carried_scriptPubKey"]
         self.fake([utxo("c9", 0, "10", 10, 200, spk=carried)])

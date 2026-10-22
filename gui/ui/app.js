@@ -207,28 +207,46 @@
     toast(e.message, "error"); return false;
   }
   function go(v) {
-    view = v;
+    view = v; clearTimeout(refreshTimer);
     $app.querySelectorAll(".nav button").forEach((b) => b.classList.toggle("on", b.dataset.v === v));
     ({ overview, receive, send, coins, identity, settings }[v] || overview)();
   }
   const page = (html) => { const p = document.getElementById("page"); p.innerHTML = html; p.parentElement.scrollTop = 0; return p; };
   const head = (title, right = "") => `<div class="page-head"><h1 class="display">${title}</h1><div class="row">${right}</div></div>`;
 
+  let refreshTimer = 0;
   async function overview() {
+    clearTimeout(refreshTimer);
     const p = page(`${head("Overview", '<button class="btn small" data-act="refresh">Refresh</button>')}
-      <section class="box balance"><div class="balance-main"><span class="label">Spendable</span><div class="amt"><b>…</b><span>XID</span></div></div>
-      <dl class="stats"><div><dt>Immature</dt><dd data-k="immature">…</dd></div><div><dt>Total</dt><dd data-k="total">…</dd></div><div><dt>Block height</dt><dd data-k="height">…</dd></div></dl></section>
+      <section class="box balance"><div class="balance-main"><div class="row"><span class="label">Balance</span><span class="chip confirming" hidden>Confirming</span></div>
+        <div class="amt"><b>…</b><span>XID</span></div><p class="bal-note" hidden></p></div>
+      <dl class="stats"><div><dt>Available now</dt><dd data-k="spendable">…</dd></div><div><dt>Confirming</dt><dd data-k="confirming">…</dd></div>
+        <div><dt>Mined, maturing</dt><dd data-k="immature">…</dd></div><div><dt>Block height</dt><dd data-k="height">…</dd></div></dl></section>
+      <div id="pending" class="stack"></div>
       <section class="box addr-strip"><span class="label">Address</span><span class="addr" data-k="address">…</span><button class="btn small" data-act="copy">Copy</button></section>
-      <p class="note">Mined coins become spendable after 1,000 blocks, about three and a half days. Balances come from ${esc(S.settings.explorer.replace(/^https?:\/\//, ""))}; your keys and signing stay on this computer.</p>`);
+      <p class="note">Your balance is what you have after your sends: right after you send, it already shows the result (before minus sent minus fee), and it becomes final when the next block confirms the transaction, about five minutes. Mined coins become spendable after 1,000 blocks. Balances come from ${esc(S.settings.explorer.replace(/^https?:\/\//, ""))}; your keys and signing stay on this computer.</p>`);
     p.querySelector('[data-act="refresh"]').onclick = overview;
     try {
       const b = await call("balance", 0);
-      p.querySelector(".amt b").textContent = b.spendable;
-      p.querySelector('[data-k="immature"]').textContent = b.immature;
-      p.querySelector('[data-k="total"]').textContent = b.total;
+      p.querySelector(".amt b").textContent = b.balance;
+      for (const k of ["spendable", "confirming", "immature"]) p.querySelector(`[data-k="${k}"]`).textContent = b[k];
       p.querySelector('[data-k="height"]').textContent = b.height != null ? Number(b.height).toLocaleString() : "–";
       p.querySelector('[data-k="address"]').textContent = b.address;
       p.querySelector('[data-act="copy"]').onclick = () => copy(b.address, "Address copied.");
+      const pend = p.querySelector("#pending");
+      if (b.pending.length) {
+        p.querySelector(".chip.confirming").hidden = false;
+        const note = p.querySelector(".bal-note"); note.hidden = false;
+        note.textContent = `Includes ${b.confirming} XID of change on its way back. Final with the next block.`;
+        pend.innerHTML = b.pending.map((e) => `<section class="box pending"><span class="label">Confirming with the next block</span>
+          <p>You sent <b>${esc(e.amount)} XID</b> to <span class="mono">${esc(short(e.to, 12, 6))}</span>.</p>
+          <div class="math"><div><b>${esc(e.before)}</b><i>before</i></div><span>−</span><div><b>${esc(e.amount)}</b><i>sent</i></div><span>−</span>
+            <div><b>${esc(e.fee)}</b><i>fee</i></div><span>=</span><div class="res"><b>${esc(e.after)}</b><i>now</i></div></div>
+          <div><button class="link" data-tx="${esc(e.txids[0])}">View the transaction</button></div></section>`).join("");
+        pend.querySelectorAll("[data-tx]").forEach((el) => (el.onclick = () => call("open_url", EXPLORER_TX(S.settings.explorer, el.dataset.tx)).catch((er) => toast(er.message, "error"))));
+        refreshTimer = setTimeout(() => { if (view === "overview" && document.getElementById("pending")) overview(); }, 30000);
+      }
+      if (b.dropped.length) pend.insertAdjacentHTML("beforeend", b.dropped.map((e) => `<p class="warn">Your send of ${esc(e.amount)} XID did not confirm, so its coins count in your balance again. Check the explorer before sending again.</p>`).join(""));
     } catch (e) {
       if (relock(e)) return;
       p.querySelector(".balance").outerHTML = `<div class="error-panel"><b>Balance unavailable</b><p>${esc(e.message)}</p><div><button class="btn small" data-act="retry">Try again</button></div></div>`;
@@ -269,7 +287,9 @@
           <div><dt>To</dt><dd class="selectable">${esc(to)}</dd></div><div><dt>Amount</dt><dd>${esc(amount)} XID</dd></div>
           <div><dt>Network fee</dt><dd>${esc(d.fee)} XID</dd></div><div><dt>Change back to you</dt><dd>${esc(d.change)} XID</dd></div>
           <div><dt>Size</dt><dd>${esc(d.vsize)} vB · ${esc(d.inputs)} input${d.inputs === 1 ? "" : "s"}</dd></div>
-          <div class="total"><dt>Total leaving</dt><dd>${(Number(amount) + Number(d.fee)).toFixed(8)} XID</dd></div></dl>
+          <div class="total"><dt>Total leaving</dt><dd>${(Number(amount) + Number(d.fee)).toFixed(8)} XID</dd></div>
+          <div><dt>Balance now</dt><dd>${esc(d.balance_before)} XID</dd></div>
+          <div class="total"><dt>Balance after this send</dt><dd>${esc(d.balance_after)} XID</dd></div></dl>
           <div class="actions">${d.mempool_accept === false ? `<p class="warn">The network would refuse this transaction: ${esc(d.reject_reason || "unknown reason")}</p>` : ""}
           <label class="check"><input type="checkbox" name="sure"> Send ${esc(amount)} XID to this address. Sent XID cannot be called back.</label>
           <button class="btn danger" data-act="send" disabled>Send now</button></div>`;
@@ -282,7 +302,9 @@
             rv.classList.add("sent");
             rv.innerHTML = `<h3>Sent</h3><dl><div><dt>Amount</dt><dd>${esc(amount)} XID</dd></div><div><dt>Fee</dt><dd>${esc(s.fee)} XID</dd></div>
               <div><dt>Transaction</dt><dd class="selectable">${esc(s.txid)}</dd></div></dl>
-              <div class="actions"><button class="btn" data-act="view">View on the explorer</button></div>`;
+              <div class="actions"><p class="note" style="color:inherit">Your balance already shows the result. It is final once the next block confirms it, about five minutes.</p>
+              <div class="row"><button class="btn" data-act="view">View on the explorer</button><button class="btn" data-act="home">See my balance</button></div></div>`;
+            rv.querySelector('[data-act="home"]').onclick = () => go("overview");
             rv.querySelector('[data-act="view"]').onclick = () => call("open_url", EXPLORER_TX(S.settings.explorer, s.txid)).catch((e) => toast(e.message, "error"));
             f.reset(); toast("Sent. It confirms in the next blocks.", "ok");
           }, S.card ? "Tap the card… sending" : "Signing and sending…");
@@ -300,7 +322,7 @@
       p.querySelector('[data-act="explorer"]').onclick = () => call("open_url", `${S.settings.explorer.replace(/\/$/, "")}/address/${r0.address}`).catch((e) => toast(e.message, "error"));
       p.querySelector("#coins").innerHTML = rows.length ? `<table class="coins"><thead><tr><th>Transaction</th><th>Height</th><th>Confirmations</th><th>Kind</th><th style="text-align:right">Amount</th></tr></thead><tbody>
         ${rows.map((u) => `<tr><td class="selectable">${esc(short(u.txid, 12, 6))}:${u.vout}</td><td>${esc(u.height ?? "–")}</td><td>${esc(u.confirmations)}</td>
-          <td>${u.coinbase ? '<span class="chip">Mined</span> ' : ""}${u.spendable ? '<span class="chip lime">Spendable</span>' : `<span class="chip">${esc(u.blocks_to_maturity)} blocks to go</span>`}</td>
+          <td>${u.confirming ? '<span class="chip">Change, confirming</span>' : `${u.coinbase ? '<span class="chip">Mined</span> ' : ""}${u.spendable ? '<span class="chip lime">Spendable</span>' : `<span class="chip">${esc(u.blocks_to_maturity)} blocks to go</span>`}`}</td>
           <td class="num">${esc(u.amount)}</td></tr>`).join("")}</tbody></table>` : '<div class="box empty"><p>No coins yet. Share your address from Receive.</p></div>';
     } catch (e) { relock(e); }
   }

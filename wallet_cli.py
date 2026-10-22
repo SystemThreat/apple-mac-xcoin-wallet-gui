@@ -1973,7 +1973,8 @@ def cmd_send(args):
         # Sign OFFLINE in the native keytool: the seed never reaches the node.
         event("signing", i, n)
         txs.append({"hex": sign_offline(seed, raw, prev), "pay": pay, "fee": f, "change": c, "inputs": len(sel),
-                    "carried_inputs": sum(1 for u in sel if u["kind"] == "carried")})
+                    "carried_inputs": sum(1 for u in sel if u["kind"] == "carried"),
+                    "outpoints": [f"{u['txid']}:{u['vout']}" for u in sel]})   # change, when there is any, is output 1
     signer = "offline keytool"
 
     for t in txs:
@@ -2025,7 +2026,9 @@ def cmd_send(args):
     if not split:
         t = txs[0]
         data = {"txid": t["txid"], "size": t["size"], "vsize": t["vsize"], "fee": fee, "change": change, "signer": signer,
-                "inputs": t["inputs"], "carried_inputs": t["carried_inputs"], "mempool_accept": t["mempool_accept"], "broadcast": bool(sent)}
+                "inputs": t["inputs"], "carried_inputs": t["carried_inputs"], "mempool_accept": t["mempool_accept"], "broadcast": bool(sent),
+                # what a wallet needs to show the new balance before the next block: the coins this spent and the change it made
+                "spent": t["outpoints"], "change_outputs": [{"txid": t["txid"], "vout": 1, "amount": t["change"]}] if t["change"] > 0 else []}
         if "reject_reason" in t: data["reject_reason"] = t["reject_reason"]
     else:
         # totals cover exactly the listed txids: all of them, or the ones a partial send got out
@@ -2033,6 +2036,8 @@ def cmd_send(args):
                 "amount": money(sum(t["pay"] for t in shown)), "fee": money(sum(t["fee"] for t in shown)),
                 "vsize": sum(t["vsize"] or 0 for t in shown), "change": money(sum(t["change"] for t in shown)),
                 "inputs": sum(t["inputs"] for t in shown), "carried_inputs": sum(t["carried_inputs"] for t in shown),
+                "spent": [o for t in shown for o in t["outpoints"]],
+                "change_outputs": [{"txid": t["txid"], "vout": 1, "amount": t["change"]} for t in shown if t["change"] > 0],
                 "signer": signer, "partial": error is not None, "size": sum(t["size"] for t in shown),
                 "mempool_accept": None if txs[0]["mempool_accept"] is None else not bad}
         if bad: data["reject_reason"] = bad[0][1]["reject_reason"] if n == 1 else "; ".join(f"transaction {i}: {t['reject_reason']}" for i, t in bad)

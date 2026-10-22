@@ -20,6 +20,8 @@ class TestSendArguments(unittest.TestCase):
         self.api = backend.Api()
         self.calls = []
         self.api._e.run = lambda *argv, **k: self.calls.append(argv) or {"txid": "00" * 32, "fee": "0.00002960"}
+        self.api._e.balance_view = lambda: {"balance": backend.w.Decimal("1"), "confirming": backend.w.Decimal(0)}
+        self.api._e.record_send = lambda *a: None
 
     def test_preview_signs_without_asking_and_never_broadcasts(self):
         self.assertIn("ok", self.api.send_preview(DEST, "0.1"))
@@ -46,3 +48,65 @@ class TestSendArguments(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBalanceArithmetic(unittest.TestCase):
+    """The balance right after a send is plain subtraction (before - sent - fee), not 'everything went out'
+    until the change confirms; and it is the same number after the block."""
+    D = backend.w.Decimal
+    COIN = {"txid": "aa" * 32, "vout": 0, "amount": D("0.33"), "kind": "two_leaf", "coinbase": False, "height": 8058, "confirmations": 3}
+    TXID = "bb" * 32
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        self.saved = backend.PENDING; backend.PENDING = Path(self.tmp.name) / "pending.json"
+        self.addCleanup(setattr, backend, "PENDING", self.saved)
+        self.e = backend.Engine.__new__(backend.Engine)
+        self.e.settings = {"file": str(Path(self.tmp.name) / "wallet.mmm"), "hrp": "xpa", "explorer": "x", "theme": "system"}
+        self.view = (8060, [dict(self.COIN)], [], set())
+        self.e.explorer_view = lambda: (self.view[0], [dict(u) for u in self.view[1]], list(self.view[2]), set(self.view[3]))
+
+    def send(self, amount="0.321", fee="0.00002960", change="0.00897040"):
+        sent = {"txid": self.TXID, "broadcast": True, "fee": fee, "spent": [f'{"aa" * 32}:0'],
+                "change_outputs": [{"txid": self.TXID, "vout": 1, "amount": change}] if self.D(change) > 0 else []}
+        self.e.record_send(sent, amount, "xpa1rdest", self.e.balance_view()["balance"])
+
+    def test_before_and_right_after_a_send(self):
+        self.assertEqual(self.e.balance_view()["balance"], self.D("0.33"))
+        self.send()
+        self.view = (8060, [], [], {f'{"aa" * 32}:0'})            # the explorer hides the coin a waiting send spends
+        v = self.e.balance_view()
+        self.assertEqual(v["balance"], self.D("0.00897040"))        # 0.33 - 0.321 - 0.0000296
+        self.assertEqual((v["spendable"], v["confirming"]), (0, self.D("0.00897040")))
+        (p,) = v["pending"]
+        self.assertEqual((p["before"], p["amount"], p["fee"], p["after"]), ("0.33000000", "0.32100000", "0.00002960", "0.00897040"))
+
+    def test_a_stale_scan_never_counts_the_spent_coin_twice(self):
+        self.send()
+        self.view = (8061, [dict(self.COIN)], [], set())             # mined, but the explorer's cached scan still lists the coin
+        self.assertEqual(self.e.balance_view()["balance"], self.D("0.00897040"))
+
+    def test_after_the_block_the_same_number_and_nothing_pending(self):
+        self.send()
+        change = dict(self.COIN, txid=self.TXID, vout=1, amount=self.D("0.00897040"), height=8061, confirmations=1)
+        self.view = (8061, [change], [], set())
+        v = self.e.balance_view()
+        self.assertEqual((v["balance"], v["spendable"], v["confirming"], v["pending"]), (self.D("0.00897040"), self.D("0.00897040"), 0, []))
+        self.assertEqual(self.e.pending_sends(), [])
+
+    def test_an_exact_spend_resolves_when_its_coin_is_gone(self):
+        self.send(amount="0.32997040", change="0")
+        self.view = (8060, [], [], {f'{"aa" * 32}:0'})
+        self.assertEqual(self.e.balance_view()["balance"], 0)
+        self.view = (8061, [], [], set())
+        v = self.e.balance_view()
+        self.assertEqual((v["balance"], v["pending"]), (0, []))
+
+    def test_a_send_that_never_confirms_gives_the_coins_back_after_an_hour(self):
+        self.send()
+        self.view = (8062, [dict(self.COIN)], [], set())             # back, unspent, out of the mempool
+        self.assertEqual(self.e.balance_view()["balance"], self.D("0.00897040"))   # within the hour: still the send's arithmetic
+        items = self.e.pending_sends(); items[0]["at"] -= backend.PENDING_DROP_SECONDS + 1; self.e._save_pending(items)
+        v = self.e.balance_view()
+        self.assertEqual((v["balance"], len(v["dropped"]), v["pending"]), (self.D("0.33"), 1, []))
