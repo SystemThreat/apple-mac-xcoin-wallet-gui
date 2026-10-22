@@ -583,8 +583,15 @@ def can_prompt():
     the parent ask instead (the text below is what NerdMiner looks for)."""
     if sys.stdin is None:   # a windowed program (pythonw on Windows) has no terminal at all
         return False
-    if os.name == "nt":   # Windows has no process groups on the console: a console stdin is ours to read
-        return sys.stdin.isatty()
+    if os.name == "nt":
+        # Windows has no process groups: a console stdin is ours to read. isatty() is not enough there, because
+        # the NUL device reports itself as a character device too; only a real console answers GetConsoleMode.
+        try:
+            import ctypes, msvcrt
+            handle = msvcrt.get_osfhandle(sys.stdin.fileno())
+            return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(ctypes.c_ulong())))
+        except Exception:
+            return False
     try:
         return sys.stdin.isatty() and os.tcgetpgrp(sys.stdin.fileno()) == os.getpgrp()
     except OSError:
