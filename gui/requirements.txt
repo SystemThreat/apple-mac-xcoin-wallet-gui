@@ -1,0 +1,5 @@
+# The XID Wallet app. pywebview draws the window with the system web view (Edge WebView2 on Windows; it brings
+# pythonnet there), qrcode draws receive codes, cryptography is the card module's AES (card wallets).
+pywebview>=5.3
+qrcode>=7.4
+cryptography>=42

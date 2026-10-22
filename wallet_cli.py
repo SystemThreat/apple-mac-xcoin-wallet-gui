@@ -1390,22 +1390,36 @@ def maturity_note(immature):
     total = sum(u["amount"] for u in immature)
     return f"{fmt(total)} immature ({len(immature)} coinbase UTXO{'s' if len(immature) != 1 else ''}, next spendable in {soonest} block{'s' if soonest != 1 else ''})"
 
+def _clip_tools():
+    """(copy argv, paste argv) for this system, or (None, None). Text goes over stdin, never argv."""
+    if sys.platform == "darwin": return ["pbcopy"], ["pbpaste"]
+    if os.name == "nt":
+        return ["clip"], ["powershell", "-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard -Raw"]
+    for copy, paste in ((["wl-copy"], ["wl-paste", "--no-newline"]),
+                        (["xclip", "-selection", "clipboard"], ["xclip", "-selection", "clipboard", "-o"]),
+                        (["xsel", "--clipboard", "--input"], ["xsel", "--clipboard", "--output"])):
+        if shutil.which(copy[0]): return copy, paste
+    return None, None
+
 def clipboard_copy(text):
-    """Copy via pbcopy stdin — the secret never appears in argv, env, or ps."""
-    if not shutil.which("pbcopy"): raise WalletError("pbcopy not found (clipboard support is macOS-only)")
-    subprocess.run(["pbcopy"], input=text.encode(), check=True)
+    """Copy via the system tool's stdin: the secret never appears in argv, env, or ps."""
+    copy, _ = _clip_tools()
+    if not copy or not shutil.which(copy[0]): raise WalletError("no clipboard tool found (Linux: install wl-clipboard or xclip)")
+    subprocess.run(copy, input=text.encode(), check=True)
 
 def clipboard_paste():
-    if not shutil.which("pbpaste"): raise WalletError("pbpaste not found (clipboard support is macOS-only)")
-    return subprocess.run(["pbpaste"], capture_output=True, check=True).stdout.decode()
+    _, paste = _clip_tools()
+    if not paste or not shutil.which(paste[0]): raise WalletError("no clipboard tool found (Linux: install wl-clipboard or xclip)")
+    return subprocess.run(paste, capture_output=True, check=True).stdout.decode()
 
 def clipboard_clear():
-    subprocess.run(["pbcopy"], input=b"", check=True)
+    clipboard_copy("")
 
 def schedule_clipboard_clear(seconds, secret):
     """Detached watcher that clears the clipboard after N seconds — but only if
     it still holds the seed (compared by SHA-256, so no secret is passed to the
-    watcher in any form)."""
+    watcher in any form). macOS only: elsewhere the caller clears it itself."""
+    if sys.platform != "darwin": return
     digest = hashlib.sha256(secret.encode()).hexdigest()
     script = ('sleep "$1"; '
               'if [ "$(pbpaste | /usr/bin/shasum -a 256 | cut -d" " -f1)" = "$2" ]; '

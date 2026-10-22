@@ -47,6 +47,28 @@ jobs:
             xcoin-wallet.exe
           if-no-files-found: ignore
 
+  windows-app:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the XID Wallet app
+        run: powershell -ExecutionPolicy Bypass -File gui\build-windows.ps1
+      - name: Smoke test (the program starts its engine and the keytool answers)
+        shell: pwsh
+        run: |
+          & "dist\XID Wallet\_internal\xcoin-wallet.exe" _v3vectors
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XID-Wallet-windows
+          path: |
+            dist/XID-Wallet-windows.zip
+            dist/XID-Wallet-windows.zip.sha256
+
   macos:
     if: github.event_name == 'workflow_dispatch' && inputs.macos
     runs-on: macos-latest

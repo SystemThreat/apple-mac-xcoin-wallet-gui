@@ -11,3 +11,9 @@ __pycache__/
 *.mmm
 card-*.auth
 *.plaintext-backup
+gui/.venv/
+gui/build/
+gui/dist/
+*.spec.bak
+gui/.venv-build/
+dist/
