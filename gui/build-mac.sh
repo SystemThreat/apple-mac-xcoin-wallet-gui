@@ -25,14 +25,14 @@ echo "== build environment"
 VENV=gui/.venv-mac-build
 [ -x "$VENV/bin/python" ] || python3 -m venv "$VENV"
 "$VENV/bin/pip" install -q --upgrade pip
-"$VENV/bin/pip" install -q -r gui/requirements.txt "pyinstaller>=6.16"
+"$VENV/bin/pip" install -q -r gui/requirements.txt "pyinstaller>=6.16" pyscard   # pyscard: card wallets (PC/SC readers such as the ACR1252)
 
 echo "== app $VERSION"
 UI=gui/ui
 rm -rf build "$APP"
 "$VENV/bin/pyinstaller" --noconfirm --clean --windowed --log-level WARN --name "XID Wallet" \
   --icon gui/assets/xid-wallet.icns --osx-bundle-identifier com.distributedledgertechnologies.xidwallet \
-  --paths "$ROOT" --hidden-import card_seed --hidden-import wallet_cli \
+  --paths "$ROOT" --hidden-import card_seed --hidden-import wallet_cli --collect-all smartcard \
   --add-data "$UI/index.html:ui" --add-data "$UI/app.js:ui" --add-data "$UI/styles.css:ui" --add-data "$UI/fonts.css:ui" \
   --add-data "$UI/identicon.js:ui" --add-data "$UI/fonts:ui/fonts" \
   --add-binary "xcoin-wallet:." \
