@@ -29,8 +29,9 @@ The graphical wallet for xCoin (XID) on macOS, in the acid lime brutalist look w
 Identity, **Sign in to MineDifferent**:
 1. The app asks minedifferent.com for a challenge (`POST /api/challenge/new`).
 2. It signs the challenge's four-line message with the XID identity (key 99,999,999) through the engine's `signmessage`, on this Mac.
-3. It posts the identity, its public key and the signature (`POST /api/challenge/<id>/solve`).
-4. It opens the one-time sign-in link the forum returns in the browser.
+3. It also signs the challenge with key 101 of the same wallet, adding a line that names the new identity (`carry-to: xid1…`). Key 101 is the key NerdMiner and MMM signed in with, so the forum moves an account that key holds to the XID identity, once (name, threads, posts, chat, role).
+4. It posts the identity, its public key and the signature, plus key 101's (`POST /api/challenge/<id>/solve`).
+5. It opens the one-time sign-in link the forum returns in the browser.
 
 Only public data leaves the computer. The forum account is the `xid1…` of key 99,999,999.
 
