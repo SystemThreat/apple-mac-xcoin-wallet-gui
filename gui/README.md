@@ -1,15 +1,17 @@
-# XID Wallet: the desktop app (Windows)
+# XID Wallet for Mac: how the app is built
 
-This is the graphical wallet for xCoin (XID), built for Windows first. It also runs on macOS and Linux, which is how it is developed. It uses the acid lime brutalist look, with a day (light) and a night (dark) mode.
+The graphical wallet for xCoin (XID) on macOS, in the acid lime brutalist look with a day (light) and a night (dark) mode. Build and install instructions for users are in the [repository README](../README.md).
 
 ## How it is built
 
 | Part | What it is |
 |---|---|
-| `app.py` | Opens the window. It uses pywebview, which draws with the system's own web view: Edge WebView2 on Windows, WebKit on macOS. The page talks to Python through pywebview's bridge only: there is no web server, no open port, and nothing is fetched from the internet to draw the app. |
-| `backend.py` | Runs the command-line wallet's own commands (`wallet_cli.py`) in-process, with JSON output. Coin selection, fees, offline signing with the keytool, and every safety check are the same code the CLI's 353 tests cover; nothing about money is written twice. |
+| `app.py` | Opens the window. pywebview draws it with macOS's own WebKit. The page talks to Python through pywebview's bridge only: there is no web server, no open port, and nothing is fetched from the internet to draw the app. |
+| `backend.py` | Runs the wallet engine's own commands (`wallet_cli.py`) in-process, with JSON output. Coin selection, fees, offline signing with the keytool, and every safety check are the same code the 370 tests cover; nothing about money is written twice. |
 | `ui/` | The screens: `index.html`, `styles.css` (color tokens, light and dark), `app.js`, the bundled fonts (Big Shoulders Display and IBM Plex, OFL), and `identicon.js`, the xCoin tetromino identicon used by MMM, superknet.com and the forum. |
-| `ui/preview.html` | Development only, never packaged. The real screens with a stand-in backend and sample data, so any browser can show every screen: `?screen=welcome\|unlock\|overview\|receive\|send\|coins\|identity\|settings&theme=light\|dark`. |
+| `ui/preview.html`, `ui/dev-mock.js`, `ui/dev-sample.js` | Development only, never packaged. The real screens with a stand-in backend and sample data, so any browser can show every screen: `?screen=welcome\|unlock\|overview\|receive\|send\|coins\|identity\|settings&theme=light\|dark`. |
+| `build-mac.sh` | Builds and checks the keytool, packages `dist/XID Wallet.app` with PyInstaller (pyscard included for card wallets), sets the bundle's name, version and category, signs it ad hoc; `--install` puts it in `/Applications` and refreshes the Dock. |
+| `assets/make_mac_icon.py` | Draws the squircle icon (below) and packs `xid-wallet.icns`. |
 
 **Keys and the identity**
 - **Funds live at index 0.** Receive, Overview, Send and Coins all use it.
@@ -22,69 +24,39 @@ This is the graphical wallet for xCoin (XID), built for Windows first. It also r
 - The app keeps it in memory only while the wallet is unlocked: it is dropped when you lock, and after 10 minutes without use.
 - The seed is decrypted for each action and never kept.
 
+## Forum sign-in (MineDifferent)
+
+Identity, **Sign in to MineDifferent**:
+1. The app asks minedifferent.com for a challenge (`POST /api/challenge/new`).
+2. It signs the challenge's four-line message with the XID identity (key 99,999,999) through the engine's `signmessage`, on this Mac.
+3. It posts the identity, its public key and the signature (`POST /api/challenge/<id>/solve`).
+4. It opens the one-time sign-in link the forum returns in the browser.
+
+Only public data leaves the computer. The forum account is the `xid1…` of key 99,999,999.
+
+## The icon
+
+`assets/make_mac_icon.py` draws the official xCoin mark (the black XID glyph, 1024-unit outline of xcoin.svg) on an acid lime squircle, on Apple's icon grid: a 1024 px canvas, an 824 px body with continuous superellipse corners (exponent 5), and a soft shadow. Google Chrome draws it, then `sips` makes every size from 16 to 1024 px and `iconutil` packs `xid-wallet.icns`. The corners are transparent, so the Dock shows the squircle alone.
+
+```bash
+python3 gui/assets/make_mac_icon.py      # after changing the drawing; then gui/build-mac.sh --install
+```
+
 ## Run it while developing
 
 ```bash
-python3 -m venv gui/.venv && gui/.venv/bin/pip install -r gui/requirements.txt
-./build.sh                    # the keytool, next to wallet_cli.py (CMake on Linux and Windows)
+python3 -m venv gui/.venv && gui/.venv/bin/pip install -r gui/requirements.txt pyscard
+./build.sh                    # the keytool, next to wallet_cli.py
 gui/.venv/bin/python gui/app.py
 ```
 
-On Windows, use `gui\.venv\Scripts\python gui\app.py`.
-
 Settings are kept in `~/.xcoin/gui-settings.json` and are not secret: the theme, the network, the explorer, and which wallet file is open. Wallet files are the CLI's `.mmm` files, so the app and the CLI open the same wallet.
-
-## Build the Mac app
-
-```bash
-gui/build-mac.sh             # dist/XID Wallet.app (Apple Silicon)
-gui/build-mac.sh --install   # also quits a running copy, installs to /Applications, refreshes the Dock and opens it
-```
-
-The same app as on Windows, packaged with PyInstaller: macOS's own WebKit draws the window, `wallet_cli.py` is the engine, and the native keytool (built by `./build.sh`, checked against the witness v3 golden vectors before packaging) sits inside the bundle. The icon is the macOS squircle (Apple's 1024 px grid, continuous superellipse corners) drawn by `assets/make_mac_icon.py` into `assets/xid-wallet.icns`. The app is ad-hoc signed, so it runs on the Mac that built it; a download for other Macs needs a Developer ID signature and notarization.
-
-## Forum sign-in (MineDifferent)
-
-Identity, **Sign in to MineDifferent**: the app asks minedifferent.com for a challenge, signs its four-line message with the XID identity (key 99,999,999) through the engine's `signmessage`, posts the identity, public key and signature back, and opens the one-time sign-in link in the browser. Only public data leaves the computer. The account is the `xid1…` of key 99,999,999.
-
-## Build the portable Windows app (on a Mac)
-
-This is how the released zip is made:
-
-```bash
-gui/build-portable.sh          # needs zig and python3; downloads from python.org (Sigstore-verified) and PyPI
-```
-
-It produces `dist/XID Wallet/` and `dist/XID-Wallet-Windows-portable-<version>.zip`, with its SHA-256 in a `.sha256` file beside it. Put that hash in the repository README's file integrity table with every release.
-
-| In the folder | What it is |
-|---|---|
-| `XID Wallet.exe` | What people double-click. `launcher/xid-wallet.c`, cross-compiled with zig, with the xCoin icon, version information and the same manifest as Python's `pythonw.exe`. It runs `app\gui\app.py` inside its own process with the bundled Python, so Windows shows one app named XID Wallet. |
-| `runtime\` | The official embeddable Python 3.12 and the app's Windows libraries. |
-| `app\` | The wallet engine, the keytool (`xcoin-wallet.exe`, cross-compiled with zig), the app, and `XID Wallet (debug).cmd`, which shows startup errors in a console. |
-
-The icon is drawn by `assets/make_icon.py` from the official xCoin mark (the black XID glyph in the acid lime circle on xcoinproject.com). In the app, Settings, Shortcuts runs `shortcuts.ps1` to put it on the desktop and in the Start menu.
-
-## Build the Windows app with PyInstaller (on Windows)
-
-On Windows with Python 3.12, CMake and Visual Studio's C++ tools, run:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File gui\build-windows.ps1
-```
-
-It produces:
-- `dist\XID Wallet\XID Wallet.exe`;
-- `dist\XID-Wallet-windows.zip`, with its SHA-256 in a file beside it.
-
-The `windows-app` job in `.github/workflows/ci.yml` runs the same script on every push and uploads the zip.
-
-Before a public release, sign the program, or Windows SmartScreen will warn on first run. Microsoft's Trusted Signing costs about $10 a month and needs DLT verified as a business.
 
 ## Not in this version yet
 
 | Feature | Status |
 |---|---|
-| Card wallets (NTAG 424 DNA) | The engine supports them. The app needs the card prompts drawn as screens, and testing with a USB reader in a Windows virtual machine. |
+| A download for other Macs | Needs an Apple Developer ID signature and notarization; the ad hoc signature works only on the Mac that built the app. |
+| Intel Macs | The keytool is built for `arm64` only. |
 | Full payment history | The explorer has no history API, so the app lists the coins you hold and links to the explorer's address page. With your own node, the CLI's `history` works. |
 | A local node | The CLI already talks to a node by RPC. The app uses the explorer for now. |

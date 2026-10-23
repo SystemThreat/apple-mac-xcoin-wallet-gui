@@ -1,4 +1,0 @@
-# Packaging the Windows app (gui/build-windows.ps1). Pillow lets PyInstaller turn the PNG icon into an .ico.
--r requirements.txt
-pyinstaller>=6.6
-pillow>=10

@@ -8,7 +8,7 @@
 
 ---
 
-This is the Mac edition of the [Windows XID Wallet](https://github.com/SystemThreat/windows-xcoin-wallet-gui): the same app, the same wallet engine, the same screens. About 97% of the code is shared unchanged; the Mac build adds its packaging, the squircle icon, and forum sign-in (which the Windows app gets too).
+This repository is the Mac edition only. The Windows edition lives in its own repository, [SystemThreat/windows-xcoin-wallet-gui](https://github.com/SystemThreat/windows-xcoin-wallet-gui); both run the same wallet engine and screens, and each carries only its own packaging.
 
 ## What you need
 
@@ -112,7 +112,7 @@ shasum -a 256 -c SHA256SUMS      # every line must say OK
 
 ## More
 
-- [gui/README.md](gui/README.md): how the app is built inside, and the Windows builds.
+- [gui/README.md](gui/README.md): how the app is built inside.
 - [RUN-YOUR-OWN-NODE.md](RUN-YOUR-OWN-NODE.md): use your own xCoin node instead of the explorer.
 - Windows edition: [SystemThreat/windows-xcoin-wallet-gui](https://github.com/SystemThreat/windows-xcoin-wallet-gui).
 

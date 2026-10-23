@@ -391,8 +391,6 @@
         <p class="note">Your wallet is the file, a card and the passphrase. Make backup cards (Card section above) and keep copies of the wallet file in separate places.</p></div></div>` :
       `<div class="set-row"><h3>Seed</h3><form class="stack" data-f="seed" autocomplete="off">${S.card ? '<p class="warn">Put your card on the reader first, then type the passphrase and press Show seed.</p>' : ""}<label class="field"><span>Passphrase, to show the seed</span><input type="password" name="pw" autocomplete="current-password"></label>
         <div><button class="btn small danger" type="submit" disabled>Show seed</button></div><div class="seed-reveal"></div></form></div>`}
-      ${S.platform === "win32" ? `<div class="set-row"><h3>Shortcuts</h3><div class="stack"><div><button class="btn small" data-act="shortcuts">Add to desktop and Start menu</button></div>
-        <p class="note">Puts an XID Wallet icon on the desktop and in the Start menu. If you move the XID Wallet folder, press it again.</p></div></div>` : ""}
       <div class="set-row"><h3>About</h3><p class="note">XID Wallet ${esc(S.version)}. Open source, MIT licence. The wallet engine is the xcoin-wallet command-line wallet; signatures are ML-DSA-65 (FIPS 204) with an SLH-DSA-SHA2-128s (FIPS 205) fallback.</p></div>
     </section>`);
     p.querySelectorAll(".seg").forEach((g) => g.querySelectorAll("button").forEach((b) => (b.onclick = async () => {
@@ -407,8 +405,6 @@
       try { S.settings = await call("set_setting", "explorer", ev.target.url.value.trim()); toast("Explorer saved.", "ok"); } catch (e) { toast(e.message, "error"); } };
     p.querySelector('[data-act="backup"]').onclick = async () => { try { const r = await call("backup"); if (r) toast(`Backed up to ${r.backup}`, "ok"); } catch (e) { toast(e.message, "error"); } };
     p.querySelector('[data-act="other"]').onclick = async () => { try { if (await call("choose_wallet_file")) { S = await call("state"); unlock(); } } catch (e) { toast(e.message, "error"); } };
-    const sc = p.querySelector('[data-act="shortcuts"]');
-    if (sc) sc.onclick = (ev) => busy(ev.currentTarget, async () => { await call("add_shortcuts"); toast("XID Wallet is on the desktop and in the Start menu.", "ok"); });
     if (S.card) {
       const out = p.querySelector('[data-k="card-out"]');
       const show = (v) => (out.textContent = JSON.stringify(v, null, 2));

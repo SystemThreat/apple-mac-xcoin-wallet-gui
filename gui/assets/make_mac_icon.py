@@ -4,11 +4,14 @@ grid (1024 px canvas, 824 px body with continuous superellipse corners, soft sha
 
     python3 gui/assets/make_mac_icon.py      (macOS: needs Google Chrome for drawing, iconutil and sips, which ship with macOS)
 
-The glyph is the same 1024-unit outline make_icon.py uses for the Windows .ico.
+The glyph is the official xCoin mark's outline, in the 1024-unit geometry of xcoin.svg (xcoinproject.com).
 """
 import math, subprocess, tempfile, shutil
 from pathlib import Path
-from make_icon import GLYPH
+GLYPH = [(763.030, 782.000), (631.529, 782.000), (511.816, 595.247), (391.734, 782.000), (260.970, 782.000),
+         (422.675, 535.206), (322.484, 535.206), (322.484, 466.693), (423.780, 466.693), (278.282, 242.000),
+         (405.731, 242.000), (514.026, 415.492), (620.111, 242.000), (746.454, 242.000), (602.430, 466.693),
+         (702.252, 466.693), (702.252, 535.206), (599.115, 535.206)]
 
 HERE = Path(__file__).resolve().parent
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"

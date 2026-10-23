@@ -263,7 +263,7 @@ class Api:
             return {"ok": fn(*a, **k)}
         except Exception as ex:   # never a traceback in the window
             msg = str(ex) if isinstance(ex, w.WalletError) else f"{type(ex).__name__}: {ex}"
-            if any(t.lower() in msg.lower() for t in self._NO_READER):   # Windows starts its card service only when a reader is attached
+            if any(t.lower() in msg.lower() for t in self._NO_READER):   # the PC/SC service sees no reader until one is attached
                 msg = "No card reader found. Plug in the USB card reader (for example an ACS ACR1252U), wait a few seconds, and try again."
             return {"error": msg}
 
@@ -439,19 +439,6 @@ class Api:
             d = self._e.run("send", destination.strip(), str(amount).strip(), "--index", idx, "--yes")
             if d.get("broadcast"): self._e.record_send(d, str(amount).strip(), destination.strip(), before)
             return d
-        return self._wrap(go)
-
-    def add_shortcuts(self):
-        """Windows: an "XID Wallet" shortcut on the desktop and in the Start menu, to this folder's XID Wallet.exe."""
-        def go():
-            import subprocess
-            script = Path(__file__).resolve().parent / "shortcuts.ps1"
-            if os.name != "nt" or not script.exists(): raise w.WalletError("Shortcuts are made on Windows only.")
-            r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
-                               capture_output=True, text=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
-            if r.returncode != 0:
-                raise w.WalletError("Could not make the shortcuts: " + ((r.stderr or r.stdout).strip().splitlines() or ["no reason given"])[-1])
-            return True
         return self._wrap(go)
 
     def open_url(self, url):
