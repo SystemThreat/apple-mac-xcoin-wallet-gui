@@ -346,7 +346,8 @@
   async function identity() {
     const p = page(`${head("Identity")}<section class="box identity"><div class="ic-big"></div><div class="identity-info">
       <span class="label">Your XID identity</span><h3>Key number 100,000,000</h3><p class="addr selectable">…</p>
-      <div class="row"><button class="btn primary" data-act="copy">Copy identity</button></div>
+      <div class="row"><button class="btn primary" data-act="copy">Copy identity</button><button class="btn" data-act="forum">Sign in to MineDifferent</button></div>
+      <p class="note" data-forum hidden></p>
       <p class="note">This is your public name on xCoin: for chat, AYEDEX and signing messages. It comes from key index 99,999,999 of your seed and nothing can be paid to it. It cannot be traced to your balance: your funds are on index 0, and every key is derived from the seed on its own.</p>
       <p class="note">The mark on the left is drawn from the identity itself, the same mark MMM, superknet.com and the forum show.</p></div></section>`);
     try {
@@ -354,6 +355,13 @@
       p.querySelector(".identity-info .addr").textContent = me.identity;
       p.querySelector(".ic-big").innerHTML = await identiconSvg(me.identity, 240);
       p.querySelector('[data-act="copy"]').onclick = () => copy(me.identity, "Identity copied.");
+      const forum = p.querySelector('[data-act="forum"]'), note = p.querySelector("[data-forum]");
+      forum.onclick = () => busy(forum, async () => {
+        const r = await call("forum_signin");   // signs the forum's challenge with key 99,999,999 here, then opens the browser
+        note.hidden = false;
+        note.textContent = `Signed in to minedifferent.com${r.role === "founder" ? " as founder" : ""}. Your browser opened the one-time sign-in link; finish there.`;
+        toast("Signed in. Check your browser.", "good");
+      }, "Signing…");
     } catch (e) { relock(e); }
   }
 
@@ -361,7 +369,7 @@
     const st = S.settings;
     const seg = (key, opts) => `<div class="seg" data-key="${key}">${opts.map(([v, t]) => `<button data-val="${v}" class="${st[key] === v ? "on" : ""}">${t}</button>`).join("")}</div>`;
     const p = page(`${head("Settings")}<section class="box settings">
-      <div class="set-row"><h3>Look</h3><div class="stack">${seg("theme", [["system", "System"], ["light", "Day"], ["dark", "Night"]])}<p class="note">System follows Windows' light or dark setting.</p></div></div>
+      <div class="set-row"><h3>Look</h3><div class="stack">${seg("theme", [["system", "System"], ["light", "Day"], ["dark", "Night"]])}<p class="note">System follows your computer's light or dark setting.</p></div></div>
       <div class="set-row"><h3>Network</h3><div class="stack">${seg("hrp", [["xpa", "Mainnet"], ["txa", "Testnet"]])}<p class="note">Mainnet addresses start xpa1r, testnet txa1r.</p></div></div>
       <div class="set-row"><h3>Explorer</h3><form class="stack" data-f="explorer"><label class="field"><span>Balances, fees and sending go through</span><input name="url" value="${esc(st.explorer)}" spellcheck="false"></label>
         <div><button class="btn small" type="submit">Save</button></div><p class="note">The explorer only reports the chain and passes on signed transactions. It never sees your keys.</p></form></div>

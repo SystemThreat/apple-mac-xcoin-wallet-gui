@@ -17,3 +17,6 @@ gui/dist/
 *.spec.bak
 gui/.venv-build/
 dist/
+gui/.venv-mac-build/
+build/
+*.spec

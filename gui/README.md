@@ -34,6 +34,19 @@ On Windows, use `gui\.venv\Scripts\python gui\app.py`.
 
 Settings are kept in `~/.xcoin/gui-settings.json` and are not secret: the theme, the network, the explorer, and which wallet file is open. Wallet files are the CLI's `.mmm` files, so the app and the CLI open the same wallet.
 
+## Build the Mac app
+
+```bash
+gui/build-mac.sh             # dist/XID Wallet.app (Apple Silicon)
+gui/build-mac.sh --install   # also quits a running copy, installs to /Applications, refreshes the Dock and opens it
+```
+
+The same app as on Windows, packaged with PyInstaller: macOS's own WebKit draws the window, `wallet_cli.py` is the engine, and the native keytool (built by `./build.sh`, checked against the witness v3 golden vectors before packaging) sits inside the bundle. The icon is the macOS squircle (Apple's 1024 px grid, continuous superellipse corners) drawn by `assets/make_mac_icon.py` into `assets/xid-wallet.icns`. The app is ad-hoc signed, so it runs on the Mac that built it; a download for other Macs needs a Developer ID signature and notarization.
+
+## Forum sign-in (MineDifferent)
+
+Identity, **Sign in to MineDifferent**: the app asks minedifferent.com for a challenge, signs its four-line message with the XID identity (key 99,999,999) through the engine's `signmessage`, posts the identity, public key and signature back, and opens the one-time sign-in link in the browser. Only public data leaves the computer. The account is the `xid1…` of key 99,999,999.
+
 ## Build the portable Windows app (on a Mac)
 
 This is how the released zip is made:
